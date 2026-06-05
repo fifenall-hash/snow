@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Platformer Game (Bug Fixed)</title>
+    <title>Web Platformer Game (Media Updated)</title>
     <style>
         body { margin: 0; padding: 0; background-color: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; }
         canvas { max-width: 100%; max-height: 100%; background-color: #c8c8c8; }
@@ -45,6 +45,7 @@ class Rect {
     inflate(dw, dh) { return new Rect(this.x - dw/2, this.y - dh/2, this.width + dw, this.height + dh); }
 }
 
+// 이미지 로더
 const loadedImages = {};
 function loadImg(path, width, height, fallbackColor = "rgba(200, 200, 200, 0.5)") {
     if (!loadedImages[path]) {
@@ -53,24 +54,64 @@ function loadImg(path, width, height, fallbackColor = "rgba(200, 200, 200, 0.5)"
     }
     return loadedImages[path];
 }
+
 function drawImageOrFallback(ctx, imgObj, x, y, isCentered = false, alpha = 1.0) {
+    if (!imgObj) return;
     ctx.globalAlpha = alpha;
     let drawX = x, drawY = y;
     if (isCentered) { drawX = x - imgObj.w / 2; drawY = y - imgObj.h; }
     if (imgObj.img.complete && imgObj.img.naturalWidth > 0) ctx.drawImage(imgObj.img, drawX, drawY, imgObj.w, imgObj.h);
-    else { ctx.fillStyle = imgObj.color; ctx.fillRect(drawX, drawY, imgObj.w, imgObj.h); }
+    else { 
+        if (imgObj.color !== "transparent") {
+            ctx.fillStyle = imgObj.color; ctx.fillRect(drawX, drawY, imgObj.w, imgObj.h); 
+        }
+    }
     ctx.globalAlpha = 1.0;
 }
 
-class DummySound { play() {} get_length() { return 5.0; } }
-function loadSound(path) { return new DummySound(); }
+// [핵심 추가] 실제 사운드 처리 클래스
+class RealSound {
+    constructor(path, isBgm = false) {
+        this.audio = new Audio(`sounds/${path}`);
+        if (isBgm) this.audio.loop = true;
+    }
+    play() {
+        if (this.audio.loop) {
+            this.audio.play().catch(() => {}); // 자동재생 방지 에러 무시
+        } else {
+            // 효과음이 겹쳐서 들릴 수 있도록 복제하여 재생
+            let clone = this.audio.cloneNode();
+            clone.volume = this.audio.volume;
+            clone.play().catch(() => {});
+        }
+    }
+    stop() {
+        this.audio.pause();
+        this.audio.currentTime = 0;
+    }
+    get_length() {
+        return this.audio.duration || 5.0; // 오디오 길이 반환
+    }
+}
 
-// --- 2. 유저 맵 데이터 복구 ---
+function loadSound(path, isBgm = false) { return new RealSound(path, isBgm); }
+
+// --- 2. 배경 및 UI 데이터 로드 ---
+const bgImgs = {};
+for(let i = 1; i <= MAX_STAGES; i++) {
+    bgImgs[i] = loadImg(`stage ${i}.png`, SCREEN_WIDTH, SCREEN_HEIGHT, "#c8c8c8");
+}
+const goodbyeImg = loadImg("goodbye.png", SCREEN_WIDTH, SCREEN_HEIGHT, "black");
+
+const uiTwoImg = loadImg("two.png", 240, 1080, "transparent");
+const uiOneImg = loadImg("one.png", 240, 1080, "transparent");
+const uiZeroImg = loadImg("zero.png", 240, 1080, "transparent");
+
+// --- 3. 유저 맵 데이터 로드 ---
 function loadAllStages() {
     const defaultPlatforms = [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]];
     const defaultColWidths = [137, 137, 137, 137, 137, 137, 137, 137, 137, 137];
     
-    // 유저가 만든 데이터
     const myOriginalMapData = {
         "stage_1": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [1316, 432, 90, 72, false, false], [1316, 504, 90, 72, false, false], [1316, 576, 90, 72, false, false], [36, 432, 91, 72, false, false], [36, 504, 91, 72, false, false], [36, 576, 91, 72, false, false], [517, 864, 59, 72, false, false], [721, 864, 145, 72, false, false], [721, 792, 145, 72, false, false], [721, 720, 145, 72, false, false], [517, 720, 59, 72, false, false], [517, 792, 59, 72, false, false], [291, 720, 70, 72, true, false], [127, 864, 20, 72, true, false], [36, 864, 91, 72, true, false], [127, 576, 20, 72, true, false], [291, 576, 70, 72, true, false], [361, 576, 156, 72, true, false], [361, 432, 156, 72, true, false], [517, 432, 59, 72, true, false], [721, 432, 145, 72, true, false], [923, 432, 158, 72, true, false], [1081, 432, 71, 72, true, false], [923, 576, 158, 72, true, false], [1081, 576, 71, 72, true, false], [1152, 576, 144, 72, true, false], [1081, 720, 71, 72, true, false], [1152, 720, 144, 72, true, false], [1152, 864, 144, 72, true, false], [1316, 864, 90, 72, true, false], [291, 432, 70, 72, true, false], [291, 864, 70, 72, true, false], [361, 720, 156, 72, true, false], [1081, 864, 71, 72, true, false], [923, 720, 158, 72, true, false], [576, 864, 145, 72, false, false], [576, 720, 145, 72, false, false], [576, 792, 145, 72, false, false], [576, 432, 145, 72, true, false], [866, 864, 57, 72, false, false], [866, 792, 57, 72, false, false], [866, 720, 57, 72, false, false], [866, 432, 57, 72, true, false], [866, 576, 57, 72, true, false], [517, 576, 59, 72, true, false], [1296, 576, 20, 72, true, false], [1296, 864, 20, 72, true, false], [147, 720, 144, 72, true, false], [147, 864, 144, 72, true, false], [147, 576, 144, 72, true, false]], "enemies": [[482, 309], [836, 309], [938, 597], [375, 597]], "col_widths": [91, 20, 144, 70, 156, 59, 145, 145, 57, 158, 71, 144, 20, 90]},
         "stage_2": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 720, 121, 72, true, false], [157, 720, 60, 72, true, false], [217, 720, 130, 72, true, false], [347, 720, 158, 72, true, false], [505, 720, 430, 72, true, false], [217, 864, 130, 72, true, false], [347, 864, 158, 72, true, false], [505, 864, 430, 72, true, false], [935, 864, 160, 72, true, false], [1151, 576, 73, 72, true, false], [1095, 576, 56, 72, true, false], [935, 576, 160, 72, true, false], [505, 576, 430, 72, true, false], [347, 576, 158, 72, true, false], [505, 432, 430, 72, true, false], [935, 432, 160, 72, true, false], [1095, 432, 56, 72, true, false], [1151, 432, 73, 72, true, false], [1224, 432, 59, 72, true, false], [1283, 432, 123, 72, true, false], [1095, 288, 56, 72, true, false], [935, 288, 160, 72, true, false], [505, 288, 430, 72, true, false], [347, 288, 158, 72, true, false], [217, 288, 130, 72, true, false], [157, 432, 60, 72, false, false], [157, 504, 60, 72, false, false], [157, 576, 60, 72, false, false], [217, 576, 130, 72, false, false], [217, 504, 130, 72, false, false], [217, 432, 130, 72, false, false], [1095, 720, 56, 72, false, false], [1095, 792, 56, 72, false, false], [1095, 864, 56, 72, false, false], [1151, 864, 73, 72, false, false], [1224, 864, 59, 72, false, false], [1224, 792, 59, 72, false, false], [1224, 720, 59, 72, false, false], [1151, 720, 73, 72, false, false], [1151, 792, 73, 72, false, false]], "enemies": [[1102, 17069163], [1167, 17069163], [1232, 17069163], [951, 165], [1196, 309], [361, 453], [951, 741]], "col_widths": [121, 60, 130, 158, 430, 160, 56, 73, 59, 123]},
@@ -79,7 +120,6 @@ function loadAllStages() {
         "stage_5": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 288, 36, 72, true, false], [72, 288, 71, 72, true, false], [36, 432, 36, 72, true, false], [36, 576, 36, 72, true, false], [72, 576, 71, 72, true, false], [36, 720, 36, 72, true, false], [36, 864, 36, 72, true, false], [72, 864, 71, 72, true, false], [143, 864, 56, 72, true, false], [235, 864, 54, 72, true, false], [289, 864, 54, 72, true, false], [433, 288, 72, 72, true, false], [505, 288, 71, 72, true, false], [576, 288, 72, 72, true, false], [648, 288, 73, 72, true, false], [721, 288, 72, 72, true, false], [793, 288, 72, 72, true, false], [865, 288, 71, 72, true, false], [343, 432, 20, 72, true, false], [433, 432, 72, 72, true, false], [505, 432, 71, 72, true, false], [865, 432, 71, 72, true, false], [1008, 432, 71, 72, true, false], [936, 288, 72, 72, true, false], [936, 432, 72, 72, true, false], [433, 576, 72, 72, true, false], [505, 576, 71, 72, true, false], [576, 576, 72, 72, true, false], [648, 576, 73, 72, true, false], [721, 576, 72, 72, true, false], [793, 576, 72, 72, true, false], [865, 576, 71, 72, true, false], [936, 576, 72, 72, true, false], [289, 720, 54, 72, true, false], [343, 720, 20, 72, true, false], [433, 720, 72, 72, true, false], [505, 720, 71, 72, true, false], [576, 720, 72, 72, true, false], [505, 864, 71, 72, true, false], [576, 864, 72, 72, true, false], [648, 864, 73, 72, true, false], [721, 864, 72, 72, true, false], [793, 864, 72, 72, true, false], [865, 864, 71, 72, true, false], [793, 720, 72, 72, true, false], [865, 720, 71, 72, true, false], [936, 720, 72, 72, true, false], [1008, 720, 71, 72, true, false], [1099, 720, 54, 72, true, false], [1099, 864, 54, 72, true, false], [1153, 864, 54, 72, true, false], [1207, 864, 36, 72, true, false], [1297, 864, 72, 72, true, false], [1369, 864, 37, 72, true, false], [1369, 720, 37, 72, true, false], [1297, 576, 72, 72, true, false], [1369, 576, 37, 72, true, false], [1369, 432, 37, 72, true, false], [1297, 288, 72, 72, true, false], [1369, 288, 37, 72, true, false], [1207, 360, 36, 72, false, false], [1153, 360, 54, 72, false, false], [1099, 360, 54, 72, false, false], [1099, 432, 54, 72, false, false], [1153, 432, 54, 72, false, false], [1153, 504, 54, 72, false, false], [1153, 576, 54, 72, false, false], [143, 360, 56, 72, false, false], [143, 288, 56, 72, false, false], [235, 360, 54, 72, false, false], [289, 360, 54, 72, false, false], [289, 432, 54, 72, false, false], [235, 432, 54, 72, false, false], [235, 504, 54, 72, false, false], [235, 576, 54, 72, false, false], [363, 432, 70, 72, true, false], [363, 720, 70, 72, true, false], [343, 864, 20, 72, true, false], [1079, 432, 20, 72, true, false], [1079, 720, 20, 72, true, false], [1079, 864, 20, 72, true, false], [199, 864, 36, 72, true, false], [199, 360, 36, 72, false, false], [1243, 864, 54, 72, true, false], [1243, 288, 54, 72, false, false], [1243, 360, 54, 72, false, false]], "enemies": [[269, 597], [1075, 597], [486, 165], [836, 165], [1116, 237], [198, 237]], "col_widths": [36, 71, 56, 36, 54, 54, 20, 70, 72, 71, 72, 73, 72, 72, 71, 72, 71, 20, 54, 54, 36, 54, 72, 37]}
     };
 
-    // 6~61 스테이지는 비어있는 초기 상태로 자동 생성 (코드 길이 절약)
     for(let i=6; i<=61; i++) {
         myOriginalMapData[`stage_${i}`] = { platforms: defaultPlatforms, enemies: [], col_widths: defaultColWidths };
     }
@@ -303,7 +343,6 @@ class Player {
         this.x += dx; this.rect.x = Math.floor(this.x);
 
         for (let plat of platforms) {
-            // [버그 수정 3] 회색 벽(passable=false)일 때만 통과 불가 논리 적용
             if (!plat.passable && this.terrainRect.colliderect(plat.rect)) {
                 if (dx > 0 && (plat.isWall || plat.exposedLeft) && origTerrain.right <= plat.rect.left) {
                     this.rect.right = plat.rect.left; this.x = this.rect.x;
@@ -368,16 +407,14 @@ class Player {
             return;
         }
         
-        // [버그 수정 2] 아래 방향키 누른 상태에서 위로 점프되는 현상 원천 차단
         if (this.onGround) {
-            if (isX) { // 점프키가 눌렸을 때
-                if (isDown) { // 아래키도 같이 눌려있다면
-                    // 내려갈 수 있는 초록 발판일 때만 아래로 떨어짐. 회색 벽이면 아무 일도 안 함!
+            if (isX) { 
+                if (isDown) { 
                     if (this.currentPlatform && this.currentPlatform.passable) {
                         this.y += 5; this.rect.y = Math.floor(this.y); 
                         this.onGround = false; this.currentPlatform = null;
                     }
-                } else { // 아래키를 누르지 않았다면 정상 점프
+                } else { 
                     this.velY = this.jumpPower; this.onGround = false; this.currentPlatform = null;
                 }
             }
@@ -393,14 +430,12 @@ class Player {
         this.onGround = false;
         
         for (let plat of platforms) {
-            // 바닥 착지 감지
             if (plat.isWall || plat.exposedTop) {
                 if (this.floorRect.colliderect(plat.rect) && this.velY > 0 && prevBottom <= plat.rect.top + 2) {
                     this.rect.bottom = plat.rect.top; this.y = this.rect.y; this.velY = 0; 
                     this.onGround = true; this.currentPlatform = plat;
                 }
             }
-            // [버그 수정 3-2] 아래에서 위로 점프할 때 회색 벽 천장에 부딪히는 로직 추가 (머리 통과 방지)
             if (!plat.passable && this.rect.colliderect(plat.rect) && this.velY < 0 && prevTop >= plat.rect.bottom - 2) {
                 this.rect.top = plat.rect.bottom; this.y = this.rect.y; this.velY = 0;
             }
@@ -419,7 +454,6 @@ class Player {
         if (this.sweptBy) return;
         if (this.shootCooldown > 0) this.shootCooldown--;
         
-        // [버그 수정 1] 한/영 상태를 무시하고 완벽하게 z키 감지
         let isZ = keys["KeyZ"] || keys["z"] || keys["Z"];
         if (isZ && this.shootCooldown === 0) {
             let startX = this.facing === 1 ? this.rect.right : this.rect.left;
@@ -452,8 +486,7 @@ class Player {
     }
 }
 
-// --- 4. 메인 루프 변수 설정 ---
-// [버그 수정 1-2] 다양한 키보드 환경(한글 IME 등)을 완벽하게 호환하는 키 감지 로직
+// --- 4. 메인 변수 및 사운드 설정 ---
 const keys = {}; const keysPressed = {}; 
 window.addEventListener("keydown", (e) => { 
     keys[e.code] = true; keysPressed[e.code] = true; 
@@ -484,7 +517,7 @@ window.addEventListener("mouseup", (e) => {
 window.addEventListener("wheel", (e) => {
     if(editorMode) {
         autoSaveCurrentStage(currentStage, platforms, enemies, colWidths, allMapData);
-        currentStage = Math.max(1, Math.min(currentStage + (e.deltaY > 0 ? 1 : -1), 61)); // 최대 61스테이지까지
+        currentStage = Math.max(1, Math.min(currentStage + (e.deltaY > 0 ? 1 : -1), MAX_STAGES)); 
         let [p, en, c] = getStageData(allMapData, currentStage);
         platforms = p; enemies = en; colWidths = c;
         stageHadEnemies = enemies.length > 0;
@@ -506,9 +539,31 @@ let editorMode = false, gameOver = false, gameClear = false, currentBrush = 1;
 let gameOverTimer = 0, gameClearTimer = 0;
 let isTransitioning = false, transitionY = 0;
 
-let shootSound = loadSound("snowflake.wav"), deadSound = loadSound("dead.wav"), kickSound = loadSound("kick.wav");
-let rollingSound = loadSound("rolling.wav"), boomSound = loadSound("boom.wav"), gameoverSound = loadSound("gameover.wav");
-let killSound = loadSound("kill.wav"), goodbyeSound = loadSound("goodbye.wav");
+// [핵심 추가] 실제 사운드 파일 로드
+let bgmSound = loadSound("bgm.wav", true); // BGM은 반복 재생 (loop: true)
+let shootSound = loadSound("snowflake.wav");
+let deadSound = loadSound("dead.wav"); 
+let kickSound = loadSound("kick.wav");
+let rollingSound = loadSound("rolling.wav"); 
+let boomSound = loadSound("boom.wav"); 
+let gameoverSound = loadSound("gameover.wav");
+let killSound = loadSound("kill.wav"); 
+let goodbyeSound = loadSound("goodbye.wav");
+
+// 사용자 상호작용 후 BGM 시작 (브라우저 정책 준수)
+let isGameStarted = false;
+window.addEventListener("mousedown", () => {
+    if (!isGameStarted) {
+        isGameStarted = true;
+        bgmSound.play();
+    }
+});
+window.addEventListener("keydown", () => {
+    if (!isGameStarted) {
+        isGameStarted = true;
+        bgmSound.play();
+    }
+});
 
 // --- 5. 게임 루프 ---
 function gameLoop() {
@@ -606,7 +661,9 @@ function gameLoop() {
             player.moveX(keys, enemies, platforms); player.jumpAndDrop(keys); player.applyPhysics(platforms, enemies);
             if (player.y > HEIGHT + 200) {
                 deadSound.play(); player.lives--;
-                if (player.lives < 0) { gameoverSound.play(); gameOver = true; } else player.respawn();
+                if (player.lives < 0) { 
+                    bgmSound.stop(); gameoverSound.play(); gameOver = true; 
+                } else player.respawn();
             }
             player.shoot(keys, snowballs, shootSound); player.update();
 
@@ -655,7 +712,9 @@ function gameLoop() {
                 if (e.snowLevel === 0 && !e.isDead && player.rect.colliderect(e.fullHitRect)) {
                     if (player.sweptBy || player.invincibleTimer > 0) continue;
                     deadSound.play(); player.lives--;
-                    if (player.lives < 0) { gameoverSound.play(); gameOver = true; } else { player.respawn(); break; }
+                    if (player.lives < 0) { 
+                        bgmSound.stop(); gameoverSound.play(); gameOver = true; 
+                    } else { player.respawn(); break; }
                 }
             }
 
@@ -667,16 +726,31 @@ function gameLoop() {
             if (enemies.length === 0 && stageHadEnemies) {
                 if (currentStage < MAX_STAGES) {
                     isTransitioning = true; transitionY = 0; snowballs = []; effects = []; stageHadEnemies = false;
-                } else { gameClear = true; goodbyeSound.play(); stageHadEnemies = false; }
+                } else { 
+                    gameClear = true; bgmSound.stop(); goodbyeSound.play(); stageHadEnemies = false; 
+                }
             }
         }
     }
 
     // ---------------------------------
+    // [핵심 변경] 배경 렌더링
+    // ---------------------------------
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = isTransitioning ? "#a0a0a0" : "#c8c8c8";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    if (isTransitioning) {
+        // 위로 올라가는 현재 스테이지 배경
+        drawImageOrFallback(ctx, bgImgs[currentStage], 0, transitionY);
+        // 아래에서 따라 올라오는 다음 스테이지 배경
+        if (currentStage + 1 <= MAX_STAGES) {
+            drawImageOrFallback(ctx, bgImgs[currentStage + 1], 0, transitionY - SCREEN_HEIGHT);
+        }
+    } else {
+        // 평상시 현재 스테이지 배경
+        drawImageOrFallback(ctx, bgImgs[currentStage], 0, 0);
+    }
 
+    // 게임 캐릭터 및 플랫폼 레이어 그리기
     gameCtx.clearRect(0, 0, gameCtx.canvas.width, gameCtx.canvas.height);
 
     if (editorMode) {
@@ -693,19 +767,27 @@ function gameLoop() {
 
     ctx.drawImage(gameCtx.canvas, OFFSET_X, 0);
 
+    // [핵심 변경] UI 및 클리어 렌더링
     if (gameOver) {
         ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0,0,SCREEN_WIDTH, SCREEN_HEIGHT);
         ctx.fillStyle = "red"; ctx.font = "bold 72px Arial"; ctx.textAlign = "center";
         ctx.fillText("GAME OVER", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
     } else if (gameClear) {
-        ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.fillRect(0,0,SCREEN_WIDTH, SCREEN_HEIGHT);
-        ctx.fillStyle = "green"; ctx.font = "bold 72px Arial"; ctx.textAlign = "center";
-        ctx.fillText("GAME CLEAR!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+        drawImageOrFallback(ctx, goodbyeImg, 0, 0); // 굿바이 화면 띄우기
     } else {
+        // UI 이미지 (좌상단 생명력 표시)
+        if (player.lives === 2) drawImageOrFallback(ctx, uiTwoImg, 0, 0);
+        else if (player.lives === 1) drawImageOrFallback(ctx, uiOneImg, 0, 0);
+        else if (player.lives <= 0) drawImageOrFallback(ctx, uiZeroImg, 0, 0);
+
         ctx.fillStyle = "black"; ctx.font = "36px Arial"; ctx.textAlign = "right";
         ctx.fillText(`Stage: ${currentStage}`, SCREEN_WIDTH - 200, 50);
-        ctx.fillText(`Lives: ${player.lives}`, SCREEN_WIDTH - 200, 100);
         
+        if (!isGameStarted) {
+            ctx.fillStyle = "blue"; ctx.textAlign = "center";
+            ctx.fillText("클릭하거나 키보드를 눌러 사운드와 함께 시작하세요!", SCREEN_WIDTH / 2, 50);
+        }
+
         if (editorMode) {
             ctx.fillStyle = "red"; ctx.font = "24px Arial"; ctx.textAlign = "left";
             let mode = currentBrush === 1 ? "Plat(반투명 점프용)" : "Wall(통과 불가 벽)";

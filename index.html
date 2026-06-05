@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Web Platformer Game (Mobile & Tablet Version)</title>
+    <title>Web Platformer Game (PC & Mobile PWA)</title>
+    
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#c8c8c8">
+
     <style>
         body { 
             margin: 0; padding: 0; background-color: #000; 
@@ -15,7 +19,7 @@
             max-width: 100%; max-height: 100%; background-color: #000; 
         }
         
-        /* 가상 게임패드 UI 스타일 */
+        /* 가상 게임패드 UI 스타일 (데스크톱에서도 마우스 클릭으로 작동 가능) */
         #gamepad {
             position: absolute;
             bottom: 8%;
@@ -23,13 +27,16 @@
             right: 3%;
             display: flex;
             justify-content: space-between;
-            pointer-events: none; /* 빈 공간 터치 통과 */
+            pointer-events: none;
             z-index: 100;
         }
+        /* PC 환경 등 가로가 넓은 모니터에서는 가상 패드를 숨기고 싶다면 아래 미디어 쿼리 주석을 해제하세요. */
+        /* @media (min-width: 1024px) { #gamepad { display: none; } } */
+
         .controls {
             display: flex;
             gap: 15px;
-            pointer-events: auto; /* 버튼 부분만 터치 인식 */
+            pointer-events: auto;
             align-items: flex-end;
         }
         .btn {
@@ -48,7 +55,6 @@
             background-color: rgba(255, 255, 255, 0.7);
             color: #000;
         }
-        /* 우측 하단 방향키 배치 (가운데가 내려가도록) */
         #btn-down { margin-bottom: -20px; }
     </style>
 </head>
@@ -140,12 +146,10 @@ let shootSound = loadSound("snowflake.wav"), deadSound = loadSound("dead.wav"), 
 let rollingSound = loadSound("rolling.wav"), boomSound = loadSound("boom.wav"), gameoverSound = loadSound("gameover.wav");
 let killSound = loadSound("kill.wav"), goodbyeSound = loadSound("goodbye.wav");
 
-// --- 3. 맵 데이터 (플랫폼 그리기 로직만 삭제, 물리 로직은 유지) ---
+// --- 3. 맵 데이터 ---
 function loadAllStages() {
     const defaultPlatforms = [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]];
     const defaultColWidths = [137, 137, 137, 137, 137, 137, 137, 137, 137, 137];
-    
-    // (이전 답변에 있던 stage_1 ~ stage_5 전체 데이터를 사용합니다)
     const myOriginalMapData = {
         "stage_1": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [1316, 432, 90, 72, false, false], [1316, 504, 90, 72, false, false], [1316, 576, 90, 72, false, false], [36, 432, 91, 72, false, false], [36, 504, 91, 72, false, false], [36, 576, 91, 72, false, false], [517, 864, 59, 72, false, false], [721, 864, 145, 72, false, false], [721, 792, 145, 72, false, false], [721, 720, 145, 72, false, false], [517, 720, 59, 72, false, false], [517, 792, 59, 72, false, false], [291, 720, 70, 72, true, false], [127, 864, 20, 72, true, false], [36, 864, 91, 72, true, false], [127, 576, 20, 72, true, false], [291, 576, 70, 72, true, false], [361, 576, 156, 72, true, false], [361, 432, 156, 72, true, false], [517, 432, 59, 72, true, false], [721, 432, 145, 72, true, false], [923, 432, 158, 72, true, false], [1081, 432, 71, 72, true, false], [923, 576, 158, 72, true, false], [1081, 576, 71, 72, true, false], [1152, 576, 144, 72, true, false], [1081, 720, 71, 72, true, false], [1152, 720, 144, 72, true, false], [1152, 864, 144, 72, true, false], [1316, 864, 90, 72, true, false], [291, 432, 70, 72, true, false], [291, 864, 70, 72, true, false], [361, 720, 156, 72, true, false], [1081, 864, 71, 72, true, false], [923, 720, 158, 72, true, false], [576, 864, 145, 72, false, false], [576, 720, 145, 72, false, false], [576, 792, 145, 72, false, false], [576, 432, 145, 72, true, false], [866, 864, 57, 72, false, false], [866, 792, 57, 72, false, false], [866, 720, 57, 72, false, false], [866, 432, 57, 72, true, false], [866, 576, 57, 72, true, false], [517, 576, 59, 72, true, false], [1296, 576, 20, 72, true, false], [1296, 864, 20, 72, true, false], [147, 720, 144, 72, true, false], [147, 864, 144, 72, true, false], [147, 576, 144, 72, true, false]], "enemies": [[482, 309], [836, 309], [938, 597], [375, 597]], "col_widths": [91, 20, 144, 70, 156, 59, 145, 145, 57, 158, 71, 144, 20, 90]},
         "stage_2": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 720, 121, 72, true, false], [157, 720, 60, 72, true, false], [217, 720, 130, 72, true, false], [347, 720, 158, 72, true, false], [505, 720, 430, 72, true, false], [217, 864, 130, 72, true, false], [347, 864, 158, 72, true, false], [505, 864, 430, 72, true, false], [935, 864, 160, 72, true, false], [1151, 576, 73, 72, true, false], [1095, 576, 56, 72, true, false], [935, 576, 160, 72, true, false], [505, 576, 430, 72, true, false], [347, 576, 158, 72, true, false], [505, 432, 430, 72, true, false], [935, 432, 160, 72, true, false], [1095, 432, 56, 72, true, false], [1151, 432, 73, 72, true, false], [1224, 432, 59, 72, true, false], [1283, 432, 123, 72, true, false], [1095, 288, 56, 72, true, false], [935, 288, 160, 72, true, false], [505, 288, 430, 72, true, false], [347, 288, 158, 72, true, false], [217, 288, 130, 72, true, false], [157, 432, 60, 72, false, false], [157, 504, 60, 72, false, false], [157, 576, 60, 72, false, false], [217, 576, 130, 72, false, false], [217, 504, 130, 72, false, false], [217, 432, 130, 72, false, false], [1095, 720, 56, 72, false, false], [1095, 792, 56, 72, false, false], [1095, 864, 56, 72, false, false], [1151, 864, 73, 72, false, false], [1224, 864, 59, 72, false, false], [1224, 792, 59, 72, false, false], [1224, 720, 59, 72, false, false], [1151, 720, 73, 72, false, false], [1151, 792, 73, 72, false, false]], "enemies": [[1102, 17069163], [1167, 17069163], [1232, 17069163], [951, 165], [1196, 309], [361, 453], [951, 741]], "col_widths": [121, 60, 130, 158, 430, 160, 56, 73, 59, 123]},
@@ -156,7 +160,6 @@ function loadAllStages() {
 
     for(let i=6; i<=61; i++) myOriginalMapData[`stage_${i}`] = { platforms: defaultPlatforms, enemies: [], col_widths: defaultColWidths };
     
-    // 로컬 스토리지에 있으면 쓰되, 없으면 기본값 반환
     const data = localStorage.getItem("map_data_json");
     let parsedData = {};
     if (data) { try { parsedData = JSON.parse(data); } catch { parsedData = {}; } }
@@ -190,8 +193,7 @@ class Platform {
         this.rect = new Rect(x, y, width, height); this.passable = passable; this.isWall = isWall;
         this.exposedTop = true; this.exposedLeft = true; this.exposedRight = true;
     }
-    // 플랫폼 그리는 로직 삭제 (배경 이미지로만 대체)
-    draw() { } 
+    draw() { } // 렌더링 삭제 (배경이 대신함)
 }
 
 class Snowball {
@@ -319,7 +321,10 @@ class Player {
         }
         if (this.kickFreezeTimer > 0) return;
         
-        let isDown = keys["ArrowDown"], isLeft = keys["ArrowLeft"], isRight = keys["ArrowRight"];
+        let isDown = keys["ArrowDown"] || keys["s"] || keys["S"];
+        let isLeft = keys["ArrowLeft"] || keys["a"] || keys["A"];
+        let isRight = keys["ArrowRight"] || keys["d"] || keys["D"];
+        
         this.isCrouching = isDown;
         let dx = 0;
         if (!this.isCrouching) {
@@ -343,7 +348,8 @@ class Player {
         for (let enemy of enemies) {
             if (enemy.snowLevel >= 4 && enemy.rollingDir === 0) {
                 if (this.rect.colliderect(enemy.fullHitRect)) {
-                    if (keys["KeyZ"]) { 
+                    let isZ = keys["KeyZ"] || keys["z"] || keys["Z"];
+                    if (isZ) { 
                         if (dx > 0) this.rect.right = enemy.fullHitRect.left;
                         else if (dx < 0) this.rect.left = enemy.fullHitRect.right;
                         this.x = this.rect.x;
@@ -375,7 +381,9 @@ class Player {
     }
 
     jumpAndDrop(keys) {
-        let isX = keys["KeyX"], isDown = keys["ArrowDown"];
+        let isX = keys["KeyX"] || keys["x"] || keys["X"];
+        let isDown = keys["ArrowDown"] || keys["s"] || keys["S"];
+        
         if (this.sweptBy) {
             if (isX) { this.velY = this.jumpPower; this.onGround = false; this.sweptBy = null; this.invincibleTimer = Math.floor(FPS * 1.5); }
             return;
@@ -422,7 +430,8 @@ class Player {
     shoot(keys, snowballs, shootSound) {
         if (this.sweptBy) return;
         if (this.shootCooldown > 0) this.shootCooldown--;
-        if (keys["KeyZ"] && this.shootCooldown === 0) {
+        let isZ = keys["KeyZ"] || keys["z"] || keys["Z"];
+        if (isZ && this.shootCooldown === 0) {
             let startX = this.facing === 1 ? this.rect.right : this.rect.left;
             snowballs.push(new Snowball(startX, this.rect.centery - 44, this.facing, startX));
             this.shootCooldown = 15; this.attackTimer = 15; shootSound.play();
@@ -449,20 +458,32 @@ class Player {
     }
 }
 
-// --- 5. 가상 버튼 입력 및 변수 설정 ---
-const keys = {}; const keysPressed = {}; 
+// --- 5. 모든 입력 장치 (가상 버튼 + 물리 키보드) 통합 설정 ---
+const keys = {}; 
 let isGameStarted = false;
 
-// 오디오 시작 안전장치
+// 5-1. 오디오 시작 안전장치 (클릭, 터치, 아무 키 입력 시 해제)
 function startAudio() {
     if (!isGameStarted) { isGameStarted = true; bgmSound.play(); }
 }
 document.addEventListener("touchstart", startAudio, { once: true });
 document.addEventListener("mousedown", startAudio, { once: true });
+document.addEventListener("keydown", startAudio, { once: true }); // PC 환경을 위한 키보드 첫 입력 인식
 
+// 5-2. PC 환경: 물리 키보드 이벤트 살리기
+window.addEventListener("keydown", (e) => {
+    keys[e.code] = true;
+    if(e.key) keys[e.key.toLowerCase()] = true; // 한/영 무시 적용
+});
+window.addEventListener("keyup", (e) => {
+    keys[e.code] = false;
+    if(e.key) keys[e.key.toLowerCase()] = false;
+});
+
+// 5-3. 모바일 환경: 가상 버튼 입력 연결
 function setupButton(id, code) {
     const btn = document.getElementById(id);
-    const press = (e) => { e.preventDefault(); startAudio(); keys[code] = true; keysPressed[code] = true; };
+    const press = (e) => { e.preventDefault(); startAudio(); keys[code] = true; };
     const release = (e) => { e.preventDefault(); keys[code] = false; };
     
     btn.addEventListener("mousedown", press);
@@ -472,13 +493,13 @@ function setupButton(id, code) {
     btn.addEventListener("touchend", release);
     btn.addEventListener("touchcancel", release);
 }
-
 setupButton("btn-z", "KeyZ");
 setupButton("btn-x", "KeyX");
 setupButton("btn-left", "ArrowLeft");
 setupButton("btn-down", "ArrowDown");
 setupButton("btn-right", "ArrowRight");
 
+// --- 변수 및 상태 초기화 ---
 let allMapData = loadAllStages();
 let currentStage = 1;
 let [platforms, enemies, colWidths] = getStageData(allMapData, currentStage);
@@ -496,9 +517,6 @@ let isTransitioning = false, transitionY = 0;
 function gameLoop() {
     updatePlatformEdges(platforms);
     
-    // 키보드 입력용 keysPressed 리셋
-    for (let k in keysPressed) keysPressed[k] = false;
-
     if (!gameOver && !gameClear) {
         if (isTransitioning) {
             transitionY += 15; player.y -= 10; player.rect.y = Math.floor(player.y);
@@ -554,8 +572,9 @@ function gameLoop() {
 
             for (let e of enemies) {
                 e.applyPhysics(platforms); e.updateLogic(platforms, rollingSound);
+                let isZ = keys["KeyZ"] || keys["z"] || keys["Z"];
                 if (e.snowLevel >= 4 && e.rollingDir === 0) {
-                    if (player.rect.inflate(10, 10).colliderect(e.fullHitRect) && keys["KeyZ"] && player.kickFreezeTimer === 0) {
+                    if (player.rect.inflate(10, 10).colliderect(e.fullHitRect) && isZ && player.kickFreezeTimer === 0) {
                         e.rollingDir = player.facing; player.kickFreezeTimer = Math.floor(FPS * 0.2); kickSound.play();
                     } else if (player.velY < 0 && player.rect.colliderect(e.fullHitRect)) {
                         if (player.rect.top > e.fullHitRect.top + (e.hitHeight * 0.4)) { e.velY = player.jumpPower; e.y += e.velY; kickSound.play(); }
@@ -598,7 +617,6 @@ function gameLoop() {
 
     gameCtx.clearRect(0, 0, gameCtx.canvas.width, gameCtx.canvas.height);
     
-    // 에디터의 벽(Wall), 발판(Plat)을 그리는 로직은 완전히 삭제되었습니다. (물리적 충돌만 존재)
     enemies.forEach(e => e.draw(gameCtx));
     snowballs.forEach(sb => sb.draw(gameCtx));
     effects.forEach(ef => ef.draw(gameCtx));
@@ -606,7 +624,7 @@ function gameLoop() {
 
     ctx.drawImage(gameCtx.canvas, OFFSET_X, 0);
 
-    // UI 및 텍스트 렌더링
+    // UI 렌더링
     if (gameOver) {
         ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0,0,SCREEN_WIDTH, SCREEN_HEIGHT);
         ctx.fillStyle = "red"; ctx.font = "bold 72px Arial"; ctx.textAlign = "center";
@@ -621,10 +639,9 @@ function gameLoop() {
         ctx.fillStyle = "black"; ctx.font = "36px Arial"; ctx.textAlign = "right";
         ctx.fillText(`Stage: ${currentStage}`, SCREEN_WIDTH - 200, 50);
         
-        // 사운드 안내
         if (!isGameStarted) {
             ctx.fillStyle = "white"; ctx.textAlign = "center";
-            ctx.fillText("버튼을 터치하여 게임과 사운드를 시작하세요!", SCREEN_WIDTH / 2, 50);
+            ctx.fillText("화면을 터치하거나 키보드를 눌러 시작하세요!", SCREEN_WIDTH / 2, 50);
         }
     }
 
@@ -632,6 +649,19 @@ function gameLoop() {
 }
 
 requestAnimationFrame(gameLoop);
+
+// --- PWA 서비스 워커 등록 코드 ---
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service_worker.js')
+            .then((registration) => {
+                console.log('서비스 워커가 성공적으로 등록되었습니다. Scope:', registration.scope);
+            })
+            .catch((error) => {
+                console.log('서비스 워커 등록 실패:', error);
+            });
+    });
+}
 
 </script>
 </body>

@@ -3,29 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web Platformer Game</title>
+    <title>Web Platformer Game (Bug Fixed)</title>
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            overflow: hidden; /* 스크롤바 숨김 */
-        }
-        canvas {
-            /* 브라우저 창 크기에 맞게 자동 스케일링 */
-            max-width: 100%;
-            max-height: 100%;
-            background-color: #c8c8c8;
-        }
+        body { margin: 0; padding: 0; background-color: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; }
+        canvas { max-width: 100%; max-height: 100%; background-color: #c8c8c8; }
     </style>
 </head>
 <body>
 
-<canvas id="gameCanvas" width="1920" height="1080"></canvas>
+<canvas id="gameCanvas" width="1920" height="1080" oncontextmenu="return false;"></canvas>
 
 <script>
 // --- 1. 기본 설정 및 유틸리티 ---
@@ -35,214 +21,223 @@ const ctx = canvas.getContext("2d");
 const SCREEN_WIDTH = 1920, SCREEN_HEIGHT = 1080;
 const WIDTH = 1442, HEIGHT = 1080;
 const OFFSET_X = Math.floor((SCREEN_WIDTH - WIDTH) / 2);
-
-const FPS = 60;
-const MAX_STAGES = 5;
+const FPS = 60, MAX_STAGES = 5;
 const WALL_THICKNESS = 36, FLOOR_THICKNESS = 72;
 const GRID_H = 72, DEFAULT_GRID_W = 137;
 
-// Pygame의 Rect를 모방한 클래스 (충돌 계산을 동일하게 유지하기 위함)
 class Rect {
     constructor(x, y, width, height) {
-        this.x = x; this.y = y;
-        this.width = width; this.height = height;
+        this.x = x; this.y = y; this.width = width; this.height = height;
     }
-    get left() { return this.x; }
-    set left(v) { this.x = v; }
-    get right() { return this.x + this.width; }
-    set right(v) { this.x = v - this.width; }
-    get top() { return this.y; }
-    set top(v) { this.y = v; }
-    get bottom() { return this.y + this.height; }
-    set bottom(v) { this.y = v - this.height; }
-    get centerx() { return this.x + this.width / 2; }
-    set centerx(v) { this.x = v - this.width / 2; }
-    get centery() { return this.y + this.height / 2; }
-    set centery(v) { this.y = v - this.height / 2; }
+    get left() { return this.x; } set left(v) { this.x = v; }
+    get right() { return this.x + this.width; } set right(v) { this.x = v - this.width; }
+    get top() { return this.y; } set top(v) { this.y = v; }
+    get bottom() { return this.y + this.height; } set bottom(v) { this.y = v - this.height; }
+    get centerx() { return this.x + this.width / 2; } set centerx(v) { this.x = v - this.width / 2; }
+    get centery() { return this.y + this.height / 2; } set centery(v) { this.y = v - this.height / 2; }
     
     copy() { return new Rect(this.x, this.y, this.width, this.height); }
     colliderect(other) {
         return !(other.left >= this.right || other.right <= this.left ||
                  other.top >= this.bottom || other.bottom <= this.top);
     }
-    collidepoint(px, py) {
-        return px >= this.left && px <= this.right && py >= this.top && py <= this.bottom;
-    }
-    inflate(dw, dh) {
-        return new Rect(this.x - dw/2, this.y - dh/2, this.width + dw, this.height + dh);
-    }
+    collidepoint(px, py) { return px >= this.left && px < this.right && py >= this.top && py < this.bottom; }
+    inflate(dw, dh) { return new Rect(this.x - dw/2, this.y - dh/2, this.width + dw, this.height + dh); }
 }
 
-// 이미지 및 사운드 더미 로더 (실제 파일 경로로 변경 가능)
 const loadedImages = {};
 function loadImg(path, width, height, fallbackColor = "rgba(200, 200, 200, 0.5)") {
     if (!loadedImages[path]) {
-        const img = new Image();
-        img.src = `images/${path}`; // 실제 에셋 폴더 구조에 맞게
+        const img = new Image(); img.src = `images/${path}`;
         loadedImages[path] = { img: img, w: width, h: height, color: fallbackColor };
     }
     return loadedImages[path];
 }
-
-class DummySound {
-    play() {}
-    get_length() { return 5.0; }
+function drawImageOrFallback(ctx, imgObj, x, y, isCentered = false, alpha = 1.0) {
+    ctx.globalAlpha = alpha;
+    let drawX = x, drawY = y;
+    if (isCentered) { drawX = x - imgObj.w / 2; drawY = y - imgObj.h; }
+    if (imgObj.img.complete && imgObj.img.naturalWidth > 0) ctx.drawImage(imgObj.img, drawX, drawY, imgObj.w, imgObj.h);
+    else { ctx.fillStyle = imgObj.color; ctx.fillRect(drawX, drawY, imgObj.w, imgObj.h); }
+    ctx.globalAlpha = 1.0;
 }
 
-function loadSound(path) {
-    // 실제 사운드가 있다면 new Audio(`sounds/${path}`)를 사용할 수 있습니다.
-    return new DummySound();
-}
+class DummySound { play() {} get_length() { return 5.0; } }
+function loadSound(path) { return new DummySound(); }
 
-// 그리기 유틸리티 함수
-function drawImageOrFallback(surfaceCtx, imgObj, x, y, isCentered = false) {
-    if (imgObj.img.complete && imgObj.img.naturalWidth > 0) {
-        let drawX = x, drawY = y;
-        if (isCentered) {
-            drawX = x - imgObj.w / 2;
-            drawY = y - imgObj.h; // midbottom 기준
-        }
-        surfaceCtx.drawImage(imgObj.img, drawX, drawY, imgObj.w, imgObj.h);
-    } else {
-        surfaceCtx.fillStyle = imgObj.color;
-        if (isCentered) {
-            surfaceCtx.fillRect(x - imgObj.w / 2, y - imgObj.h, imgObj.w, imgObj.h);
-        } else {
-            surfaceCtx.fillRect(x, y, imgObj.w, imgObj.h);
-        }
-    }
-}
-
-// --- 2. 맵 데이터 (LocalStorage 사용) ---
+// --- 2. 유저 맵 데이터 복구 ---
 function loadAllStages() {
-    // 1. 가져오신 파이썬 맵 데이터를 변수에 완벽하게 담습니다. (괄호 에러 수정됨)
+    const defaultPlatforms = [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]];
+    const defaultColWidths = [137, 137, 137, 137, 137, 137, 137, 137, 137, 137];
+    
+    // 유저가 만든 데이터
     const myOriginalMapData = {
-        "stage_1": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [1316, 432, 90, 72, false, false], [1316, 504, 90, 72, false, false], [1316, 576, 90, 72, false, false], [36, 432, 91, 72, false, false], [36, 504, 91, 72, false, false], [36, 576, 91, 72, false, false], [517, 864, 59, 72, false, false], [721, 864, 145, 72, false, false], [721, 792, 145, 72, false, false], [721, 720, 145, 72, false, false], [517, 720, 59, 72, false, false], [517, 792, 59, 72, false, false], [291, 720, 70, 72, true, false], [127, 864, 20, 72, true, false], [36, 864, 91, 72, true, false], [127, 576, 20, 72, true, false], [291, 576, 70, 72, true, false], [361, 576, 156, 72, true, false], [361, 432, 156, 72, true, false], [517, 432, 59, 72, true, false], [721, 432, 145, 72, true, false], [923, 432, 158, 72, true, false], [1081, 432, 71, 72, true, false], [923, 576, 158, 72, true, false], [1081, 576, 71, 72, true, false], [1152, 576, 144, 72, true, false], [1081, 720, 71, 72, true, false], [1152, 720, 144, 72, true, false], [1152, 864, 144, 72, true, false], [1316, 864, 90, 72, true, false], [291, 432, 70, 72, true, false], [291, 864, 70, 72, true, false], [361, 720, 156, 72, true, false], [1081, 864, 71, 72, true, false], [923, 720, 158, 72, true, false], [576, 864, 145, 72, false, false], [576, 720, 145, 72, false, false], [576, 792, 145, 72, false, false], [576, 432, 145, 72, true, false], [866, 864, 57, 72, false, false], [866, 792, 57, 72, false, false], [866, 720, 57, 72, false, false], [866, 432, 57, 72, true, false], [866, 576, 57, 72, true, false], [517, 576, 59, 72, true, false], [1296, 576, 20, 72, true, false], [1296, 864, 20, 72, true, false], [147, 720, 144, 72, true, false], [147, 864, 144, 72, true, false], [147, 576, 144, 72, true, false]], "enemies": [[482, 309], [836, 309], [938, 597], [375, 597]], "col_widths": [91, 20, 144, 70, 156, 59, 145, 145, 57, 158, 71, 144, 20, 90]}, 
-        "stage_2": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 720, 121, 72, true, false], [157, 720, 60, 72, true, false], [217, 720, 130, 72, true, false], [347, 720, 158, 72, true, false], [505, 720, 430, 72, true, false], [217, 864, 130, 72, true, false], [347, 864, 158, 72, true, false], [505, 864, 430, 72, true, false], [935, 864, 160, 72, true, false], [1151, 576, 73, 72, true, false], [1095, 576, 56, 72, true, false], [935, 576, 160, 72, true, false], [505, 576, 430, 72, true, false], [347, 576, 158, 72, true, false], [505, 432, 430, 72, true, false], [935, 432, 160, 72, true, false], [1095, 432, 56, 72, true, false], [1151, 432, 73, 72, true, false], [1224, 432, 59, 72, true, false], [1283, 432, 123, 72, true, false], [1095, 288, 56, 72, true, false], [935, 288, 160, 72, true, false], [505, 288, 430, 72, true, false], [347, 288, 158, 72, true, false], [217, 288, 130, 72, true, false], [157, 432, 60, 72, false, false], [157, 504, 60, 72, false, false], [157, 576, 60, 72, false, false], [217, 576, 130, 72, false, false], [217, 504, 130, 72, false, false], [217, 432, 130, 72, false, false], [1095, 720, 56, 72, false, false], [1095, 792, 56, 72, false, false], [1095, 864, 56, 72, false, false], [1151, 864, 73, 72, false, false], [1224, 864, 59, 72, false, false], [1224, 792, 59, 72, false, false], [1224, 720, 59, 72, false, false], [1151, 720, 73, 72, false, false], [1151, 792, 73, 72, false, false]], "enemies": [[1102, 17069163], [1167, 17069163], [1232, 17069163], [951, 165], [1196, 309], [361, 453], [951, 741]], "col_widths": [121, 60, 130, 158, 430, 160, 56, 73, 59, 123]}, 
-        "stage_3": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 432, 110, 72, true, false], [146, 432, 70, 72, true, false], [216, 288, 160, 72, true, false], [376, 288, 55, 72, true, false], [431, 288, 58, 72, true, false], [146, 576, 70, 72, true, false], [216, 576, 160, 72, true, false], [36, 720, 110, 72, true, false], [146, 720, 70, 72, true, false], [216, 720, 160, 72, true, false], [376, 720, 55, 72, true, false], [146, 864, 70, 72, true, false], [216, 864, 160, 72, true, false], [376, 864, 55, 72, true, false], [431, 864, 58, 72, true, false], [522, 864, 72, 72, true, false], [847, 864, 73, 72, true, false], [920, 864, 31, 72, true, false], [1010, 864, 54, 72, true, false], [1064, 864, 161, 72, true, false], [1225, 864, 71, 72, true, false], [1010, 720, 54, 72, true, false], [1064, 720, 161, 72, true, false], [1225, 720, 71, 72, true, false], [1296, 720, 110, 72, true, false], [1064, 576, 161, 72, true, false], [1225, 576, 71, 72, true, false], [1225, 432, 71, 72, true, false], [1296, 432, 110, 72, true, false], [1064, 288, 161, 72, true, false], [1010, 288, 54, 72, true, false], [920, 288, 31, 72, true, false], [806, 288, 41, 72, false, false], [847, 288, 73, 72, false, false], [847, 360, 73, 72, false, false], [806, 360, 41, 72, false, false], [806, 432, 41, 72, false, false], [847, 432, 73, 72, false, false], [920, 432, 31, 72, false, false], [1010, 432, 54, 72, false, false], [806, 504, 41, 72, false, false], [847, 504, 73, 72, false, false], [920, 504, 31, 72, false, false], [1010, 504, 54, 72, false, false], [1010, 576, 54, 72, false, false], [594, 648, 40, 72, false, false], [634, 648, 172, 72, false, false], [634, 720, 172, 72, false, false], [806, 720, 41, 72, false, false], [806, 648, 41, 72, false, false], [594, 720, 40, 72, false, false], [594, 792, 40, 72, false, false], [594, 864, 40, 72, false, false], [634, 864, 172, 72, false, false], [806, 792, 41, 72, false, false], [634, 792, 172, 72, false, false], [806, 864, 41, 72, false, false], [376, 576, 55, 72, false, false], [431, 576, 58, 72, false, false], [431, 504, 58, 72, false, false], [376, 432, 55, 72, false, false], [376, 504, 55, 72, false, false], [431, 432, 58, 72, false, false], [522, 432, 72, 72, false, false], [522, 504, 72, 72, false, false], [594, 504, 40, 72, false, false], [594, 432, 40, 72, false, false], [594, 360, 40, 72, false, false], [522, 288, 72, 72, false, false], [522, 360, 72, 72, false, false], [594, 288, 40, 72, false, false], [489, 288, 33, 72, true, false], [489, 864, 33, 72, true, false], [489, 504, 33, 72, false, false], [489, 432, 33, 72, false, false], [951, 864, 59, 72, true, false], [951, 288, 59, 72, true, false], [951, 432, 59, 72, false, false], [951, 504, 59, 72, false, false], [951, 576, 59, 72, false, false]], "enemies": [[1287, 309], [1287, 597], [27, 309], [27, 597], [232, 165], [1080, 165]], "col_widths": [110, 70, 160, 55, 58, 33, 72, 40, 172, 41, 73, 31, 59, 54, 161, 71, 110]}, 
-        "stage_4": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [289, 432, 141, 72, true, false], [127, 576, 20, 72, true, false], [289, 576, 141, 72, true, false], [289, 720, 141, 72, true, false], [36, 864, 91, 72, true, false], [127, 864, 20, 72, true, false], [577, 576, 76, 72, true, false], [721, 576, 68, 72, true, false], [653, 576, 68, 72, true, false], [789, 576, 75, 72, true, false], [653, 288, 68, 72, true, false], [721, 288, 68, 72, true, false], [993, 432, 20, 72, true, false], [1152, 576, 141, 72, true, false], [993, 720, 20, 72, true, false], [1152, 720, 141, 72, true, false], [1152, 864, 141, 72, true, false], [1313, 864, 93, 72, true, false], [450, 288, 127, 72, false, false], [577, 288, 76, 72, false, false], [577, 360, 76, 72, false, false], [577, 432, 76, 72, false, false], [450, 432, 127, 72, false, false], [450, 360, 127, 72, false, false], [789, 288, 75, 72, false, false], [864, 288, 129, 72, false, false], [864, 360, 129, 72, false, false], [864, 432, 129, 72, false, false], [789, 432, 75, 72, false, false], [789, 360, 75, 72, false, false], [36, 432, 91, 72, false, false], [36, 504, 91, 72, false, false], [36, 576, 91, 72, false, false], [450, 720, 127, 72, false, false], [450, 792, 127, 72, false, false], [450, 864, 127, 72, false, false], [577, 864, 76, 72, false, false], [577, 792, 76, 72, false, false], [577, 720, 76, 72, false, false], [789, 720, 75, 72, false, false], [789, 792, 75, 72, false, false], [789, 864, 75, 72, false, false], [864, 864, 129, 72, false, false], [864, 792, 129, 72, false, false], [864, 720, 129, 72, false, false], [1313, 576, 93, 72, false, false], [1313, 504, 93, 72, false, false], [1313, 432, 93, 72, false, false], [1293, 576, 20, 72, true, false], [1293, 864, 20, 72, true, false], [147, 576, 142, 72, true, false], [147, 720, 142, 72, true, false], [147, 864, 142, 72, true, false], [430, 432, 20, 72, true, false], [430, 720, 20, 72, true, false], [1013, 432, 139, 72, true, false], [1013, 576, 139, 72, true, false], [1013, 720, 139, 72, true, false]], "enemies": [[450, 165], [864, 165], [450, 597], [864, 597], [26, 741], [1313, 741]], "col_widths": [91, 20, 142, 141, 20, 127, 76, 68, 68, 75, 129, 20, 139, 141, 20, 93]}, 
-        "stage_5": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 288, 36, 72, true, false], [72, 288, 71, 72, true, false], [36, 432, 36, 72, true, false], [36, 576, 36, 72, true, false], [72, 576, 71, 72, true, false], [36, 720, 36, 72, true, false], [36, 864, 36, 72, true, false], [72, 864, 71, 72, true, false], [143, 864, 56, 72, true, false], [235, 864, 54, 72, true, false], [289, 864, 54, 72, true, false], [433, 288, 72, 72, true, false], [505, 288, 71, 72, true, false], [576, 288, 72, 72, true, false], [648, 288, 73, 72, true, false], [721, 288, 72, 72, true, false], [793, 288, 72, 72, true, false], [865, 288, 71, 72, true, false], [343, 432, 20, 72, true, false], [433, 432, 72, 72, true, false], [505, 432, 71, 72, true, false], [865, 432, 71, 72, true, false], [1008, 432, 71, 72, true, false], [936, 288, 72, 72, true, false], [936, 432, 72, 72, true, false], [433, 576, 72, 72, true, false], [505, 576, 71, 72, true, false], [576, 576, 72, 72, true, false], [648, 576, 73, 72, true, false], [721, 576, 72, 72, true, false], [793, 576, 72, 72, true, false], [865, 576, 71, 72, true, false], [936, 576, 72, 72, true, false], [289, 720, 54, 72, true, false], [343, 720, 20, 72, true, false], [433, 720, 72, 72, true, false], [505, 720, 71, 72, true, false], [576, 720, 72, 72, true, false], [505, 864, 71, 72, true, false], [576, 864, 72, 72, true, false], [648, 864, 73, 72, true, false], [721, 864, 72, 72, true, false], [793, 864, 72, 72, true, false], [865, 864, 71, 72, true, false], [793, 720, 72, 72, true, false], [865, 720, 71, 72, true, false], [936, 720, 72, 72, true, false], [1008, 720, 71, 72, true, false], [1099, 720, 54, 72, true, false], [1099, 864, 54, 72, true, false], [1153, 864, 54, 72, true, false], [1207, 864, 36, 72, true, false], [1297, 864, 72, 72, true, false], [1369, 864, 37, 72, true, false], [1369, 720, 37, 72, true, false], [1297, 576, 72, 72, true, false], [1369, 576, 37, 72, true, false], [1369, 432, 37, 72, true, false], [1297, 288, 72, 72, true, false], [1369, 288, 37, 72, true, false], [1207, 360, 36, 72, false, false], [1153, 360, 54, 72, false, false], [1099, 360, 54, 72, false, false], [1099, 432, 54, 72, false, false], [1153, 432, 54, 72, false, false], [1153, 504, 54, 72, false, false], [1153, 576, 54, 72, false, false], [143, 360, 56, 72, false, false], [143, 288, 56, 72, false, false], [235, 360, 54, 72, false, false], [289, 360, 54, 72, false, false], [289, 432, 54, 72, false, false], [235, 432, 54, 72, false, false], [235, 504, 54, 72, false, false], [235, 576, 54, 72, false, false], [363, 432, 70, 72, true, false], [363, 720, 70, 72, true, false], [343, 864, 20, 72, true, false], [1079, 432, 20, 72, true, false], [1079, 720, 20, 72, true, false], [1079, 864, 20, 72, true, false], [199, 864, 36, 72, true, false], [199, 360, 36, 72, false, false], [1243, 864, 54, 72, true, false], [1243, 288, 54, 72, false, false], [1243, 360, 54, 72, false, false]], "enemies": [[269, 597], [1075, 597], [486, 165], [836, 165], [1116, 237], [198, 237]], "col_widths": [36, 71, 56, 36, 54, 54, 20, 70, 72, 71, 72, 73, 72, 72, 71, 72, 71, 20, 54, 54, 36, 54, 72, 37]}, 
-        "stage_6": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_7": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_8": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_9": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_10": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_11": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_12": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_13": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_14": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_15": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_16": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_17": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_18": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_19": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_20": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_21": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_22": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_23": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_24": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_25": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_26": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_27": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_28": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_29": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_30": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_31": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_32": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_33": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_34": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_35": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_36": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_37": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_38": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_39": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_40": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_41": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_42": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_43": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_44": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_45": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_46": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_47": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_48": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_49": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_50": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_51": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_52": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_53": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_54": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_55": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_56": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_57": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_58": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_59": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_60": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}, 
-        "stage_61": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true]], "enemies": [], "col_widths": [137, 137, 137, 137, 137, 137, 137, 137, 137, 137]}
+        "stage_1": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [1316, 432, 90, 72, false, false], [1316, 504, 90, 72, false, false], [1316, 576, 90, 72, false, false], [36, 432, 91, 72, false, false], [36, 504, 91, 72, false, false], [36, 576, 91, 72, false, false], [517, 864, 59, 72, false, false], [721, 864, 145, 72, false, false], [721, 792, 145, 72, false, false], [721, 720, 145, 72, false, false], [517, 720, 59, 72, false, false], [517, 792, 59, 72, false, false], [291, 720, 70, 72, true, false], [127, 864, 20, 72, true, false], [36, 864, 91, 72, true, false], [127, 576, 20, 72, true, false], [291, 576, 70, 72, true, false], [361, 576, 156, 72, true, false], [361, 432, 156, 72, true, false], [517, 432, 59, 72, true, false], [721, 432, 145, 72, true, false], [923, 432, 158, 72, true, false], [1081, 432, 71, 72, true, false], [923, 576, 158, 72, true, false], [1081, 576, 71, 72, true, false], [1152, 576, 144, 72, true, false], [1081, 720, 71, 72, true, false], [1152, 720, 144, 72, true, false], [1152, 864, 144, 72, true, false], [1316, 864, 90, 72, true, false], [291, 432, 70, 72, true, false], [291, 864, 70, 72, true, false], [361, 720, 156, 72, true, false], [1081, 864, 71, 72, true, false], [923, 720, 158, 72, true, false], [576, 864, 145, 72, false, false], [576, 720, 145, 72, false, false], [576, 792, 145, 72, false, false], [576, 432, 145, 72, true, false], [866, 864, 57, 72, false, false], [866, 792, 57, 72, false, false], [866, 720, 57, 72, false, false], [866, 432, 57, 72, true, false], [866, 576, 57, 72, true, false], [517, 576, 59, 72, true, false], [1296, 576, 20, 72, true, false], [1296, 864, 20, 72, true, false], [147, 720, 144, 72, true, false], [147, 864, 144, 72, true, false], [147, 576, 144, 72, true, false]], "enemies": [[482, 309], [836, 309], [938, 597], [375, 597]], "col_widths": [91, 20, 144, 70, 156, 59, 145, 145, 57, 158, 71, 144, 20, 90]},
+        "stage_2": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 720, 121, 72, true, false], [157, 720, 60, 72, true, false], [217, 720, 130, 72, true, false], [347, 720, 158, 72, true, false], [505, 720, 430, 72, true, false], [217, 864, 130, 72, true, false], [347, 864, 158, 72, true, false], [505, 864, 430, 72, true, false], [935, 864, 160, 72, true, false], [1151, 576, 73, 72, true, false], [1095, 576, 56, 72, true, false], [935, 576, 160, 72, true, false], [505, 576, 430, 72, true, false], [347, 576, 158, 72, true, false], [505, 432, 430, 72, true, false], [935, 432, 160, 72, true, false], [1095, 432, 56, 72, true, false], [1151, 432, 73, 72, true, false], [1224, 432, 59, 72, true, false], [1283, 432, 123, 72, true, false], [1095, 288, 56, 72, true, false], [935, 288, 160, 72, true, false], [505, 288, 430, 72, true, false], [347, 288, 158, 72, true, false], [217, 288, 130, 72, true, false], [157, 432, 60, 72, false, false], [157, 504, 60, 72, false, false], [157, 576, 60, 72, false, false], [217, 576, 130, 72, false, false], [217, 504, 130, 72, false, false], [217, 432, 130, 72, false, false], [1095, 720, 56, 72, false, false], [1095, 792, 56, 72, false, false], [1095, 864, 56, 72, false, false], [1151, 864, 73, 72, false, false], [1224, 864, 59, 72, false, false], [1224, 792, 59, 72, false, false], [1224, 720, 59, 72, false, false], [1151, 720, 73, 72, false, false], [1151, 792, 73, 72, false, false]], "enemies": [[1102, 17069163], [1167, 17069163], [1232, 17069163], [951, 165], [1196, 309], [361, 453], [951, 741]], "col_widths": [121, 60, 130, 158, 430, 160, 56, 73, 59, 123]},
+        "stage_3": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 432, 110, 72, true, false], [146, 432, 70, 72, true, false], [216, 288, 160, 72, true, false], [376, 288, 55, 72, true, false], [431, 288, 58, 72, true, false], [146, 576, 70, 72, true, false], [216, 576, 160, 72, true, false], [36, 720, 110, 72, true, false], [146, 720, 70, 72, true, false], [216, 720, 160, 72, true, false], [376, 720, 55, 72, true, false], [146, 864, 70, 72, true, false], [216, 864, 160, 72, true, false], [376, 864, 55, 72, true, false], [431, 864, 58, 72, true, false], [522, 864, 72, 72, true, false], [847, 864, 73, 72, true, false], [920, 864, 31, 72, true, false], [1010, 864, 54, 72, true, false], [1064, 864, 161, 72, true, false], [1225, 864, 71, 72, true, false], [1010, 720, 54, 72, true, false], [1064, 720, 161, 72, true, false], [1225, 720, 71, 72, true, false], [1296, 720, 110, 72, true, false], [1064, 576, 161, 72, true, false], [1225, 576, 71, 72, true, false], [1225, 432, 71, 72, true, false], [1296, 432, 110, 72, true, false], [1064, 288, 161, 72, true, false], [1010, 288, 54, 72, true, false], [920, 288, 31, 72, true, false], [806, 288, 41, 72, false, false], [847, 288, 73, 72, false, false], [847, 360, 73, 72, false, false], [806, 360, 41, 72, false, false], [806, 432, 41, 72, false, false], [847, 432, 73, 72, false, false], [920, 432, 31, 72, false, false], [1010, 432, 54, 72, false, false], [806, 504, 41, 72, false, false], [847, 504, 73, 72, false, false], [920, 504, 31, 72, false, false], [1010, 504, 54, 72, false, false], [1010, 576, 54, 72, false, false], [594, 648, 40, 72, false, false], [634, 648, 172, 72, false, false], [634, 720, 172, 72, false, false], [806, 720, 41, 72, false, false], [806, 648, 41, 72, false, false], [594, 720, 40, 72, false, false], [594, 792, 40, 72, false, false], [594, 864, 40, 72, false, false], [634, 864, 172, 72, false, false], [806, 792, 41, 72, false, false], [634, 792, 172, 72, false, false], [806, 864, 41, 72, false, false], [376, 576, 55, 72, false, false], [431, 576, 58, 72, false, false], [431, 504, 58, 72, false, false], [376, 432, 55, 72, false, false], [376, 504, 55, 72, false, false], [431, 432, 58, 72, false, false], [522, 432, 72, 72, false, false], [522, 504, 72, 72, false, false], [594, 504, 40, 72, false, false], [594, 432, 40, 72, false, false], [594, 360, 40, 72, false, false], [522, 288, 72, 72, false, false], [522, 360, 72, 72, false, false], [594, 288, 40, 72, false, false], [489, 288, 33, 72, true, false], [489, 864, 33, 72, true, false], [489, 504, 33, 72, false, false], [489, 432, 33, 72, false, false], [951, 864, 59, 72, true, false], [951, 288, 59, 72, true, false], [951, 432, 59, 72, false, false], [951, 504, 59, 72, false, false], [951, 576, 59, 72, false, false]], "enemies": [[1287, 309], [1287, 597], [27, 309], [27, 597], [232, 165], [1080, 165]], "col_widths": [110, 70, 160, 55, 58, 33, 72, 40, 172, 41, 73, 31, 59, 54, 161, 71, 110]},
+        "stage_4": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [289, 432, 141, 72, true, false], [127, 576, 20, 72, true, false], [289, 576, 141, 72, true, false], [289, 720, 141, 72, true, false], [36, 864, 91, 72, true, false], [127, 864, 20, 72, true, false], [577, 576, 76, 72, true, false], [721, 576, 68, 72, true, false], [653, 576, 68, 72, true, false], [789, 576, 75, 72, true, false], [653, 288, 68, 72, true, false], [721, 288, 68, 72, true, false], [993, 432, 20, 72, true, false], [1152, 576, 141, 72, true, false], [993, 720, 20, 72, true, false], [1152, 720, 141, 72, true, false], [1152, 864, 141, 72, true, false], [1313, 864, 93, 72, true, false], [450, 288, 127, 72, false, false], [577, 288, 76, 72, false, false], [577, 360, 76, 72, false, false], [577, 432, 76, 72, false, false], [450, 432, 127, 72, false, false], [450, 360, 127, 72, false, false], [789, 288, 75, 72, false, false], [864, 288, 129, 72, false, false], [864, 360, 129, 72, false, false], [864, 432, 129, 72, false, false], [789, 432, 75, 72, false, false], [789, 360, 75, 72, false, false], [36, 432, 91, 72, false, false], [36, 504, 91, 72, false, false], [36, 576, 91, 72, false, false], [450, 720, 127, 72, false, false], [450, 792, 127, 72, false, false], [450, 864, 127, 72, false, false], [577, 864, 76, 72, false, false], [577, 792, 76, 72, false, false], [577, 720, 76, 72, false, false], [789, 720, 75, 72, false, false], [789, 792, 75, 72, false, false], [789, 864, 75, 72, false, false], [864, 864, 129, 72, false, false], [864, 792, 129, 72, false, false], [864, 720, 129, 72, false, false], [1313, 576, 93, 72, false, false], [1313, 504, 93, 72, false, false], [1313, 432, 93, 72, false, false], [1293, 576, 20, 72, true, false], [1293, 864, 20, 72, true, false], [147, 576, 142, 72, true, false], [147, 720, 142, 72, true, false], [147, 864, 142, 72, true, false], [430, 432, 20, 72, true, false], [430, 720, 20, 72, true, false], [1013, 432, 139, 72, true, false], [1013, 576, 139, 72, true, false], [1013, 720, 139, 72, true, false]], "enemies": [[450, 165], [864, 165], [450, 597], [864, 597], [26, 741], [1313, 741]], "col_widths": [91, 20, 142, 141, 20, 127, 76, 68, 68, 75, 129, 20, 139, 141, 20, 93]},
+        "stage_5": {"platforms": [[0, 1008, 1442, 72, false, true], [0, 0, 36, 1080, false, true], [1406, 0, 36, 1080, false, true], [36, 288, 36, 72, true, false], [72, 288, 71, 72, true, false], [36, 432, 36, 72, true, false], [36, 576, 36, 72, true, false], [72, 576, 71, 72, true, false], [36, 720, 36, 72, true, false], [36, 864, 36, 72, true, false], [72, 864, 71, 72, true, false], [143, 864, 56, 72, true, false], [235, 864, 54, 72, true, false], [289, 864, 54, 72, true, false], [433, 288, 72, 72, true, false], [505, 288, 71, 72, true, false], [576, 288, 72, 72, true, false], [648, 288, 73, 72, true, false], [721, 288, 72, 72, true, false], [793, 288, 72, 72, true, false], [865, 288, 71, 72, true, false], [343, 432, 20, 72, true, false], [433, 432, 72, 72, true, false], [505, 432, 71, 72, true, false], [865, 432, 71, 72, true, false], [1008, 432, 71, 72, true, false], [936, 288, 72, 72, true, false], [936, 432, 72, 72, true, false], [433, 576, 72, 72, true, false], [505, 576, 71, 72, true, false], [576, 576, 72, 72, true, false], [648, 576, 73, 72, true, false], [721, 576, 72, 72, true, false], [793, 576, 72, 72, true, false], [865, 576, 71, 72, true, false], [936, 576, 72, 72, true, false], [289, 720, 54, 72, true, false], [343, 720, 20, 72, true, false], [433, 720, 72, 72, true, false], [505, 720, 71, 72, true, false], [576, 720, 72, 72, true, false], [505, 864, 71, 72, true, false], [576, 864, 72, 72, true, false], [648, 864, 73, 72, true, false], [721, 864, 72, 72, true, false], [793, 864, 72, 72, true, false], [865, 864, 71, 72, true, false], [793, 720, 72, 72, true, false], [865, 720, 71, 72, true, false], [936, 720, 72, 72, true, false], [1008, 720, 71, 72, true, false], [1099, 720, 54, 72, true, false], [1099, 864, 54, 72, true, false], [1153, 864, 54, 72, true, false], [1207, 864, 36, 72, true, false], [1297, 864, 72, 72, true, false], [1369, 864, 37, 72, true, false], [1369, 720, 37, 72, true, false], [1297, 576, 72, 72, true, false], [1369, 576, 37, 72, true, false], [1369, 432, 37, 72, true, false], [1297, 288, 72, 72, true, false], [1369, 288, 37, 72, true, false], [1207, 360, 36, 72, false, false], [1153, 360, 54, 72, false, false], [1099, 360, 54, 72, false, false], [1099, 432, 54, 72, false, false], [1153, 432, 54, 72, false, false], [1153, 504, 54, 72, false, false], [1153, 576, 54, 72, false, false], [143, 360, 56, 72, false, false], [143, 288, 56, 72, false, false], [235, 360, 54, 72, false, false], [289, 360, 54, 72, false, false], [289, 432, 54, 72, false, false], [235, 432, 54, 72, false, false], [235, 504, 54, 72, false, false], [235, 576, 54, 72, false, false], [363, 432, 70, 72, true, false], [363, 720, 70, 72, true, false], [343, 864, 20, 72, true, false], [1079, 432, 20, 72, true, false], [1079, 720, 20, 72, true, false], [1079, 864, 20, 72, true, false], [199, 864, 36, 72, true, false], [199, 360, 36, 72, false, false], [1243, 864, 54, 72, true, false], [1243, 288, 54, 72, false, false], [1243, 360, 54, 72, false, false]], "enemies": [[269, 597], [1075, 597], [486, 165], [836, 165], [1116, 237], [198, 237]], "col_widths": [36, 71, 56, 36, 54, 54, 20, 70, 72, 71, 72, 73, 72, 72, 71, 72, 71, 20, 54, 54, 36, 54, 72, 37]}
     };
 
-    // 2. 브라우저의 기존 기억(저장소)을 확인합니다.
-    const data = localStorage.getItem("map_data_json");
-    let parsedData = {};
-    if (data) {
-        try { parsedData = JSON.parse(data); } catch { parsedData = {}; }
+    // 6~61 스테이지는 비어있는 초기 상태로 자동 생성 (코드 길이 절약)
+    for(let i=6; i<=61; i++) {
+        myOriginalMapData[`stage_${i}`] = { platforms: defaultPlatforms, enemies: [], col_widths: defaultColWidths };
     }
 
-    // 3. 만약 기존 기억이 아예 비어있거나, stage_1 데이터가 없다면
-    // 방금 붙여넣은 myOriginalMapData로 강제로 덮어쓰기를 진행합니다!
+    const data = localStorage.getItem("map_data_json");
+    let parsedData = {};
+    if (data) { try { parsedData = JSON.parse(data); } catch { parsedData = {}; } }
+
     if (Object.keys(parsedData).length === 0 || !parsedData["stage_1"]) {
         saveAllStages(myOriginalMapData);
         return myOriginalMapData;
     }
-
-    // 이미 올바른 데이터가 저장되어 있다면 그걸 그대로 사용합니다.
     return parsedData;
 }
-
-function saveAllStages(data) {
-    localStorage.setItem("map_data_json", JSON.stringify(data));
-}
-
+function saveAllStages(data) { localStorage.setItem("map_data_json", JSON.stringify(data)); }
 function getStageData(allData, stageNum) {
     const stageKey = `stage_${stageNum}`;
     if (allData[stageKey]) {
         const pData = allData[stageKey].platforms;
         const eData = allData[stageKey].enemies;
         const colW = allData[stageKey].col_widths || Array(10).fill(DEFAULT_GRID_W);
-        return [
-            pData.map(p => new Platform(p[0], p[1], p[2], p[3], p[4], p[5])),
-            eData.map(e => new Enemy(e[0], e[1])),
-            colW
-        ];
-    } else {
-        const defaultPlatforms = [
-            new Platform(0, HEIGHT - FLOOR_THICKNESS, WIDTH, FLOOR_THICKNESS, false, true),
-            new Platform(0, 0, WALL_THICKNESS, HEIGHT, false, true),
-            new Platform(WIDTH - WALL_THICKNESS, 0, WALL_THICKNESS, HEIGHT, false, true)
-        ];
-        return [defaultPlatforms, [], Array(10).fill(DEFAULT_GRID_W)];
+        return [ pData.map(p => new Platform(p[0], p[1], p[2], p[3], p[4], p[5])), eData.map(e => new Enemy(e[0], e[1])), colW ];
     }
+    return [ [], [], [] ];
 }
-
 function autoSaveCurrentStage(stageNum, platforms, enemies, colWidths, allData) {
     allData[`stage_${stageNum}`] = {
         platforms: platforms.map(p => [p.rect.x, p.rect.y, p.rect.width, p.rect.height, p.passable, p.isWall]),
-        enemies: enemies.map(e => [e.rect.x, e.rect.y]),
-        col_widths: colWidths
+        enemies: enemies.map(e => [e.rect.x, e.rect.y]), col_widths: colWidths
     };
     saveAllStages(allData);
+}
+
+function updatePlatformEdges(platforms) {
+    for (let p of platforms) {
+        if (p.passable || p.isWall) {
+            p.exposedTop = true; p.exposedLeft = true; p.exposedRight = true;
+        } else {
+            p.exposedTop = !platforms.some(o => o !== p && !o.passable && o.rect.bottom === p.rect.top && o.rect.left < p.rect.right && o.rect.right > p.rect.left);
+            p.exposedLeft = !platforms.some(o => o !== p && !o.passable && o.rect.right === p.rect.left && o.rect.top < p.rect.bottom && o.rect.bottom > p.rect.top);
+            p.exposedRight = !platforms.some(o => o !== p && !o.passable && o.rect.left === p.rect.right && o.rect.top < p.rect.bottom && o.rect.bottom > p.rect.top);
+        }
+    }
 }
 
 // --- 3. 클래스 정의 ---
 class Platform {
     constructor(x, y, width, height, passable = true, isWall = false) {
-        this.rect = new Rect(x, y, width, height);
-        this.passable = passable;
-        this.isWall = isWall;
+        this.rect = new Rect(x, y, width, height); this.passable = passable; this.isWall = isWall;
         this.exposedTop = true; this.exposedLeft = true; this.exposedRight = true;
     }
-    draw(surfaceCtx) {
-        surfaceCtx.fillStyle = this.passable ? "rgba(100, 200, 100, 0.6)" : "rgba(80, 80, 80, 0.6)";
-        surfaceCtx.fillRect(this.rect.x, this.rect.y, this.rect.width, this.rect.height);
+    draw(ctx) {
+        ctx.fillStyle = this.passable ? "rgba(100, 200, 100, 0.6)" : "rgba(80, 80, 80, 0.6)";
+        ctx.fillRect(this.rect.x, this.rect.y, this.rect.width, this.rect.height);
+    }
+}
+
+class Snowball {
+    constructor(x, y, direction, startX) {
+        this.width = 42; this.height = 89;
+        this.rect = new Rect(direction === 1 ? x : x - this.width, y, this.width, this.height);
+        this.speed = 12 * direction; this.startX = startX; this.direction = direction;
+        this.imgL = loadImg("snowflake_L.png", this.width, this.height, "white");
+        this.imgR = loadImg("snowflake_R.png", this.width, this.height, "white");
+    }
+    update() {
+        this.rect.x += this.speed;
+        let diff = Math.abs(this.rect.x - (this.direction === 1 ? this.startX : this.startX - this.width));
+        return diff > 314;
+    }
+    draw(ctx) { drawImageOrFallback(ctx, this.direction === 1 ? this.imgR : this.imgL, this.rect.x, this.rect.y); }
+}
+
+class Effect {
+    constructor(x, y, width, height) {
+        this.rect = new Rect(x - width/2, y - height/2, width, height);
+        this.img = loadImg("flake_end.png", width, height, "yellow");
+        this.timer = 15;
+    }
+    update() { this.timer--; return this.timer <= 0; }
+    draw(ctx) { drawImageOrFallback(ctx, this.img, this.rect.x, this.rect.y); }
+}
+
+class Enemy {
+    constructor(x, y) {
+        this.width = 128; this.height = 123;
+        this.rect = new Rect(x, y, this.width, this.height);
+        this.x = x; this.y = y; this.velY = 0; this.gravity = 0.5;
+        this.snowLevel = 0; this.rollingDir = 0; this.rollingSpeed = 15;
+        this.meltTimer = 0; this.meltThreshold = FPS * 3;
+        this.isDead = false; this.facing = 1;
+        
+        this.img = loadImg("enemy.png", this.width, this.height, "red");
+        this.imgSbL = [1,2,3,4].map(i => loadImg(`snowball${i}_L.png`, this.width, this.height, "white"));
+        this.imgSbR = [1,2,3,4].map(i => loadImg(`snowball${i}_R.png`, this.width, this.height, "white"));
+    }
+    get hitWidth() { return this.snowLevel >= 4 ? 60 : this.width; }
+    get hitHeight() { return this.snowLevel >= 4 ? 100 : this.height; }
+    get hitOffsetX() { return Math.floor((this.width - this.hitWidth) / 2); }
+    get hitOffsetY() { return this.height - this.hitHeight; }
+    get fullHitRect() { return new Rect(this.rect.x + this.hitOffsetX, this.rect.y + this.hitOffsetY, this.hitWidth, this.hitHeight); }
+    get terrainRect() { return new Rect(this.rect.x + this.hitOffsetX, this.rect.bottom - 70, this.hitWidth, 70); }
+    get floorRect() { 
+        let w = Math.floor(this.hitWidth / 2);
+        return new Rect(this.rect.x + Math.floor((this.width - w) / 2), this.rect.bottom - 70, w, 70);
+    }
+    
+    applyPhysics(platforms) {
+        let prevBottom = this.rect.bottom;
+        this.velY += this.gravity; this.y += this.velY; this.rect.y = Math.floor(this.y);
+        for (let plat of platforms) {
+            if (plat.isWall || plat.exposedTop) {
+                if (this.floorRect.colliderect(plat.rect) && this.velY > 0 && prevBottom <= plat.rect.top + 2) {
+                    this.rect.bottom = plat.rect.top; this.y = this.rect.y; this.velY = 0;
+                }
+            }
+        }
+        if (this.y > HEIGHT + 200) this.isDead = true;
+    }
+    
+    updateLogic(platforms, rollingSound) {
+        if (this.rollingDir !== 0) {
+            let dx = this.rollingSpeed * this.rollingDir;
+            let origTerrain = this.terrainRect.copy();
+            this.x += dx; this.rect.x = Math.floor(this.x);
+            let hitWall = false;
+            for (let plat of platforms) {
+                if (!plat.passable && this.terrainRect.colliderect(plat.rect)) {
+                    if (plat.isWall || (dx > 0 && plat.exposedLeft) || (dx < 0 && plat.exposedRight)) {
+                        if (dx > 0 && origTerrain.right <= plat.rect.left) {
+                            this.x = plat.rect.left - this.hitOffsetX - this.hitWidth; this.rect.x = Math.floor(this.x);
+                            hitWall = true; break;
+                        } else if (dx < 0 && origTerrain.left >= plat.rect.right) {
+                            this.x = plat.rect.right - this.hitOffsetX; this.rect.x = Math.floor(this.x);
+                            hitWall = true; break;
+                        }
+                    }
+                }
+            }
+            if (hitWall) {
+                if (this.rect.bottom >= HEIGHT - FLOOR_THICKNESS) this.isDead = true;
+                else { this.rollingDir *= -1; if(rollingSound) rollingSound.play(); }
+            }
+        } else {
+            if (this.snowLevel > 0) {
+                this.meltTimer++;
+                if (this.meltTimer >= this.meltThreshold) { this.snowLevel--; this.meltTimer = 0; }
+            }
+        }
+    }
+    
+    draw(ctx) {
+        if (this.snowLevel === 0) drawImageOrFallback(ctx, this.img, this.rect.x, this.rect.y);
+        else {
+            let imgs = this.facing === -1 ? this.imgSbL : this.imgSbR;
+            let idx = Math.min(this.snowLevel - 1, 3);
+            drawImageOrFallback(ctx, imgs[idx], this.rect.x, this.rect.y);
+        }
     }
 }
 
@@ -250,8 +245,7 @@ class Player {
     constructor(x, y) {
         this.width = 99; this.height = 139;
         this.rect = new Rect(x, y, this.width, this.height);
-        this.x = x; this.y = y;
-        this.velY = 0; this.speed = 6;
+        this.x = x; this.y = y; this.velY = 0; this.speed = 6;
         this.gravity = 0.5; this.jumpPower = -12.25;
         this.onGround = false; this.facing = 1;
         this.shootCooldown = 0; this.lives = 2;
@@ -259,19 +253,18 @@ class Player {
         this.kickFreezeTimer = 0; this.isCrouching = false;
         this.attackTimer = 0; this.currentPlatform = null;
 
-        // 에셋 로딩 (색상은 이미지가 없을 때를 위한 플레이스홀더)
         this.imgL = loadImg("player_L.png", this.width, this.height, "blue");
         this.imgR = loadImg("player_R.png", this.width, this.height, "blue");
         this.imgDownL = loadImg("down_L.png", 104, 95, "lightblue");
         this.imgDownR = loadImg("down_R.png", 104, 95, "lightblue");
         this.imgAttackL = loadImg("attack_L.png", 111, 138, "cyan");
         this.imgAttackR = loadImg("attack_R.png", 111, 138, "cyan");
+        this.imgClear = loadImg("clear.png", this.width, this.height, "green");
     }
 
     get terrainRect() { return new Rect(this.rect.x, this.rect.bottom - 70, this.rect.width, 70); }
     get floorRect() { 
-        const w = Math.floor(this.rect.width / 2);
-        const offsetX = Math.floor((this.rect.width - w) / 2);
+        let w = Math.floor(this.rect.width / 2); let offsetX = Math.floor((this.rect.width - w) / 2);
         return new Rect(this.rect.x + offsetX, this.rect.bottom - 70, w, 70);
     }
 
@@ -283,21 +276,156 @@ class Player {
         this.isCrouching = false; this.attackTimer = 0;
     }
 
-    applyPhysics(platforms) {
-        if (this.sweptBy || this.kickFreezeTimer > 0) return;
-        let prevBottom = this.rect.bottom;
-        this.velY += this.gravity;
-        this.y += this.velY; this.rect.y = Math.floor(this.y);
-        this.onGround = false;
+    moveX(keys, enemies, platforms) {
+        if (this.sweptBy) {
+            this.rect.centerx = this.sweptBy.fullHitRect.centerx;
+            this.rect.bottom = this.sweptBy.fullHitRect.bottom;
+            this.x = this.rect.x; this.y = this.rect.y; this.velY = 0;
+            return;
+        }
+        if (this.kickFreezeTimer > 0) return;
+        
+        let isDown = keys["ArrowDown"] || keys["s"] || keys["S"];
+        let isLeft = keys["ArrowLeft"] || keys["a"] || keys["A"];
+        let isRight = keys["ArrowRight"] || keys["d"] || keys["D"];
+
+        this.isCrouching = isDown;
+        let dx = 0;
+        if (!this.isCrouching) {
+            if (isLeft) { dx = -this.speed; this.facing = -1; }
+            if (isRight) { dx = this.speed; this.facing = 1; }
+        } else {
+            if (isLeft) this.facing = -1;
+            if (isRight) this.facing = 1;
+        }
+        
+        let origTerrain = this.terrainRect.copy();
+        this.x += dx; this.rect.x = Math.floor(this.x);
 
         for (let plat of platforms) {
-            if (plat.isWall || plat.exposedTop) {
-                if (this.floorRect.colliderect(plat.rect) && this.velY > 0 && prevBottom <= plat.rect.top + 2) {
-                    this.rect.bottom = plat.rect.top;
-                    this.y = this.rect.y; this.velY = 0; this.onGround = true;
-                    this.currentPlatform = plat;
+            // [버그 수정 3] 회색 벽(passable=false)일 때만 통과 불가 논리 적용
+            if (!plat.passable && this.terrainRect.colliderect(plat.rect)) {
+                if (dx > 0 && (plat.isWall || plat.exposedLeft) && origTerrain.right <= plat.rect.left) {
+                    this.rect.right = plat.rect.left; this.x = this.rect.x;
+                } else if (dx < 0 && (plat.isWall || plat.exposedRight) && origTerrain.left >= plat.rect.right) {
+                    this.rect.left = plat.rect.right; this.x = this.rect.x;
                 }
             }
+        }
+
+        for (let enemy of enemies) {
+            if (enemy.snowLevel >= 4 && enemy.rollingDir === 0) {
+                if (this.rect.colliderect(enemy.fullHitRect)) {
+                    let isZ = keys["KeyZ"] || keys["z"] || keys["Z"];
+                    if (isZ) { 
+                        if (dx > 0) this.rect.right = enemy.fullHitRect.left;
+                        else if (dx < 0) this.rect.left = enemy.fullHitRect.right;
+                        this.x = this.rect.x;
+                    } else { 
+                        let pushSpeed = this.speed / 2;
+                        if (this.rect.centerx < enemy.fullHitRect.centerx && dx > 0) {
+                            this.rect.right = enemy.fullHitRect.left; this.x = this.rect.x;
+                            let eOrig = enemy.terrainRect.copy();
+                            enemy.x += pushSpeed; enemy.rect.x = Math.floor(enemy.x);
+                            for (let p of platforms) {
+                                if (!p.passable && enemy.terrainRect.colliderect(p.rect)) {
+                                    if (p.isWall || p.exposedLeft) {
+                                        if (eOrig.right <= p.rect.left) { enemy.rect.right = p.rect.left; enemy.x = enemy.rect.x; }
+                                    }
+                                }
+                            }
+                        } else if (this.rect.centerx > enemy.fullHitRect.centerx && dx < 0) {
+                            this.rect.left = enemy.fullHitRect.right; this.x = this.rect.x;
+                            let eOrig = enemy.terrainRect.copy();
+                            enemy.x -= pushSpeed; enemy.rect.x = Math.floor(enemy.x);
+                            for (let p of platforms) {
+                                if (!p.passable && enemy.terrainRect.colliderect(p.rect)) {
+                                    if (p.isWall || p.exposedRight) {
+                                        if (eOrig.left >= p.rect.right) { enemy.rect.left = p.rect.right; enemy.x = enemy.rect.x; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    jumpAndDrop(keys) {
+        let isX = keys["KeyX"] || keys["x"] || keys["X"];
+        let isDown = keys["ArrowDown"] || keys["s"] || keys["S"];
+
+        if (this.sweptBy) {
+            if (isX) {
+                this.velY = this.jumpPower; this.onGround = false; this.sweptBy = null;
+                this.invincibleTimer = Math.floor(FPS * 1.5);
+            }
+            return;
+        }
+        if (this.kickFreezeTimer > 0) {
+            if (isX) { this.velY = this.jumpPower; this.onGround = false; this.kickFreezeTimer = 0; }
+            return;
+        }
+        
+        // [버그 수정 2] 아래 방향키 누른 상태에서 위로 점프되는 현상 원천 차단
+        if (this.onGround) {
+            if (isX) { // 점프키가 눌렸을 때
+                if (isDown) { // 아래키도 같이 눌려있다면
+                    // 내려갈 수 있는 초록 발판일 때만 아래로 떨어짐. 회색 벽이면 아무 일도 안 함!
+                    if (this.currentPlatform && this.currentPlatform.passable) {
+                        this.y += 5; this.rect.y = Math.floor(this.y); 
+                        this.onGround = false; this.currentPlatform = null;
+                    }
+                } else { // 아래키를 누르지 않았다면 정상 점프
+                    this.velY = this.jumpPower; this.onGround = false; this.currentPlatform = null;
+                }
+            }
+        }
+    }
+
+    applyPhysics(platforms, enemies) {
+        if (this.sweptBy || this.kickFreezeTimer > 0) return;
+        let prevBottom = this.rect.bottom;
+        let prevTop = this.rect.top;
+        
+        this.velY += this.gravity; this.y += this.velY; this.rect.y = Math.floor(this.y);
+        this.onGround = false;
+        
+        for (let plat of platforms) {
+            // 바닥 착지 감지
+            if (plat.isWall || plat.exposedTop) {
+                if (this.floorRect.colliderect(plat.rect) && this.velY > 0 && prevBottom <= plat.rect.top + 2) {
+                    this.rect.bottom = plat.rect.top; this.y = this.rect.y; this.velY = 0; 
+                    this.onGround = true; this.currentPlatform = plat;
+                }
+            }
+            // [버그 수정 3-2] 아래에서 위로 점프할 때 회색 벽 천장에 부딪히는 로직 추가 (머리 통과 방지)
+            if (!plat.passable && this.rect.colliderect(plat.rect) && this.velY < 0 && prevTop >= plat.rect.bottom - 2) {
+                this.rect.top = plat.rect.bottom; this.y = this.rect.y; this.velY = 0;
+            }
+        }
+        
+        for (let enemy of enemies) {
+            if (enemy.snowLevel >= 4 && enemy.rollingDir === 0) {
+                if (this.rect.colliderect(enemy.fullHitRect) && this.velY > 0 && prevBottom <= enemy.fullHitRect.top + 2) {
+                    this.rect.bottom = enemy.fullHitRect.top; this.y = this.rect.y; this.velY = 0; this.onGround = true;
+                }
+            }
+        }
+    }
+
+    shoot(keys, snowballs, shootSound) {
+        if (this.sweptBy) return;
+        if (this.shootCooldown > 0) this.shootCooldown--;
+        
+        // [버그 수정 1] 한/영 상태를 무시하고 완벽하게 z키 감지
+        let isZ = keys["KeyZ"] || keys["z"] || keys["Z"];
+        if (isZ && this.shootCooldown === 0) {
+            let startX = this.facing === 1 ? this.rect.right : this.rect.left;
+            snowballs.push(new Snowball(startX, this.rect.centery - 44, this.facing, startX));
+            this.shootCooldown = 15; this.attackTimer = 15;
+            shootSound.play();
         }
     }
 
@@ -305,114 +433,289 @@ class Player {
         if (this.invincibleTimer > 0) this.invincibleTimer--;
         if (this.kickFreezeTimer > 0) this.kickFreezeTimer--;
         if (this.attackTimer > 0) this.attackTimer--;
-        if (this.shootCooldown > 0) this.shootCooldown--;
     }
 
-    draw(ctx) {
+    draw(ctx, isTransitioning = false) {
+        if (isTransitioning) { drawImageOrFallback(ctx, this.imgClear, this.rect.x, this.rect.y); return; }
         if (this.invincibleTimer > 0 && Math.floor(this.invincibleTimer / 5) % 2 !== 0) return;
+
         let img = this.facing === 1 ? this.imgR : this.imgL;
         if (this.sweptBy) img = this.sweptBy.rollingDir === 1 ? this.imgDownR : this.imgDownL;
         else if (this.attackTimer > 0) img = this.facing === 1 ? this.imgAttackR : this.imgAttackL;
         else if (this.isCrouching) img = this.facing === 1 ? this.imgDownR : this.imgDownL;
 
-        drawImageOrFallback(ctx, img, this.rect.centerx, this.rect.bottom, true);
+        if (this.sweptBy || this.attackTimer > 0 || this.isCrouching) {
+            drawImageOrFallback(ctx, img, this.rect.centerx, this.rect.bottom, true);
+        } else {
+            drawImageOrFallback(ctx, img, this.rect.x, this.rect.y);
+        }
     }
 }
 
-class Enemy {
-    constructor(x, y) {
-        this.width = 128; this.height = 123;
-        this.rect = new Rect(x, y, this.width, this.height);
-        this.x = x; this.y = y;
-        this.velY = 0; this.gravity = 0.5;
-        this.snowLevel = 0; this.rollingDir = 0; this.rollingSpeed = 15;
-        this.isDead = false; this.facing = 1;
-        this.img = loadImg("enemy.png", this.width, this.height, "red");
-    }
-    // 기본 로직 구조 유지 (크기 상략됨)
-    draw(ctx) {
-        drawImageOrFallback(ctx, this.img, this.rect.x, this.rect.y);
-    }
-}
+// --- 4. 메인 루프 변수 설정 ---
+// [버그 수정 1-2] 다양한 키보드 환경(한글 IME 등)을 완벽하게 호환하는 키 감지 로직
+const keys = {}; const keysPressed = {}; 
+window.addEventListener("keydown", (e) => { 
+    keys[e.code] = true; keysPressed[e.code] = true; 
+    if(e.key) { keys[e.key.toLowerCase()] = true; keysPressed[e.key.toLowerCase()] = true; }
+});
+window.addEventListener("keyup", (e) => { 
+    keys[e.code] = false; 
+    if(e.key) { keys[e.key.toLowerCase()] = false; }
+});
 
-// --- 4. 메인 게임 루프 및 입력 ---
-const keys = {};
-window.addEventListener("keydown", (e) => { keys[e.code] = true; });
-window.addEventListener("keyup", (e) => { keys[e.code] = false; });
+let mx = 0, my = 0; let hoverLine = null; let draggingLineIdx = null; let isMouseDownL = false; let isMouseDownR = false;
+window.addEventListener("mousemove", (e) => {
+    let r = canvas.getBoundingClientRect();
+    let scaleX = canvas.width / r.width; let scaleY = canvas.height / r.height;
+    mx = Math.floor((e.clientX - r.left) * scaleX) - OFFSET_X;
+    my = Math.floor((e.clientY - r.top) * scaleY);
+});
+window.addEventListener("mousedown", (e) => {
+    if(e.button === 0) isMouseDownL = true;
+    if(e.button === 2) isMouseDownR = true;
+    if(editorMode && e.button === 0 && hoverLine !== null) draggingLineIdx = hoverLine;
+});
+window.addEventListener("mouseup", (e) => {
+    if(e.button === 0) isMouseDownL = false;
+    if(e.button === 2) isMouseDownR = false;
+    if(draggingLineIdx !== null) { draggingLineIdx = null; autoSaveCurrentStage(currentStage, platforms, enemies, colWidths, allMapData); }
+});
+window.addEventListener("wheel", (e) => {
+    if(editorMode) {
+        autoSaveCurrentStage(currentStage, platforms, enemies, colWidths, allMapData);
+        currentStage = Math.max(1, Math.min(currentStage + (e.deltaY > 0 ? 1 : -1), 61)); // 최대 61스테이지까지
+        let [p, en, c] = getStageData(allMapData, currentStage);
+        platforms = p; enemies = en; colWidths = c;
+        stageHadEnemies = enemies.length > 0;
+        player.respawn(); snowballs = []; effects = [];
+    }
+});
 
-const player = new Player(100, HEIGHT - FLOOR_THICKNESS - 139);
-const allMapData = loadAllStages();
+let allMapData = loadAllStages();
 let currentStage = 1;
 let [platforms, enemies, colWidths] = getStageData(allMapData, currentStage);
-let gameOver = false;
+let stageHadEnemies = enemies.length > 0;
+const player = new Player(100, HEIGHT - FLOOR_THICKNESS - 139);
+let snowballs = [], effects = [];
 
-// 오프스크린 캔버스 (game_surf 대체)
-const gameSurf = document.createElement("canvas");
-gameSurf.width = WIDTH; gameSurf.height = HEIGHT;
-const gameCtx = gameSurf.getContext("2d");
+let gameCtx = document.createElement('canvas').getContext('2d');
+gameCtx.canvas.width = WIDTH; gameCtx.canvas.height = HEIGHT;
 
+let editorMode = false, gameOver = false, gameClear = false, currentBrush = 1;
+let gameOverTimer = 0, gameClearTimer = 0;
+let isTransitioning = false, transitionY = 0;
+
+let shootSound = loadSound("snowflake.wav"), deadSound = loadSound("dead.wav"), kickSound = loadSound("kick.wav");
+let rollingSound = loadSound("rolling.wav"), boomSound = loadSound("boom.wav"), gameoverSound = loadSound("gameover.wav");
+let killSound = loadSound("kill.wav"), goodbyeSound = loadSound("goodbye.wav");
+
+// --- 5. 게임 루프 ---
 function gameLoop() {
-    // 1. 상태 업데이트
-    if (!gameOver) {
-        let dx = 0;
-        player.isCrouching = keys["ArrowDown"];
-        if (!player.isCrouching && player.kickFreezeTimer === 0 && !player.sweptBy) {
-            if (keys["ArrowLeft"]) { dx = -player.speed; player.facing = -1; }
-            if (keys["ArrowRight"]) { dx = player.speed; player.facing = 1; }
+    updatePlatformEdges(platforms);
+    let lineXs = [WALL_THICKNESS];
+    for (let w of colWidths) lineXs.push(lineXs[lineXs.length - 1] + w);
+    hoverLine = null;
+
+    if (keysPressed["Escape"]) {
+        if (editorMode) {
+            autoSaveCurrentStage(currentStage, platforms, enemies, colWidths, allMapData);
+            if (enemies.length > 0) stageHadEnemies = true;
         }
-        
-        player.x += dx; player.rect.x = Math.floor(player.x);
-        
-        // 점프 (키보드 X)
-        if (player.onGround && keys["KeyX"]) {
-            player.velY = player.jumpPower;
-            player.onGround = false;
-            player.currentPlatform = null;
+        editorMode = !editorMode;
+    }
+    if (editorMode) {
+        if(draggingLineIdx === null) {
+            for(let i = 1; i < lineXs.length - 1; i++) {
+                if(Math.abs(mx - lineXs[i]) <= 5) { hoverLine = i; break; }
+            }
+        }
+        canvas.style.cursor = (hoverLine !== null || draggingLineIdx !== null) ? "col-resize" : "default";
+
+        if(draggingLineIdx !== null) {
+            let i = draggingLineIdx;
+            let newX = Math.max(lineXs[i-1] + 20, Math.min(mx, lineXs[i+1] - 20));
+            let dx = newX - lineXs[i];
+            if (dx !== 0) {
+                let oldLineI = lineXs[i]; colWidths[i-1] += dx; colWidths[i] -= dx; lineXs[i] = newX;
+                for (let p of platforms) {
+                    if (p.isWall) continue;
+                    if (p.rect.x === lineXs[i-1]) p.rect.width += dx;
+                    else if (p.rect.x === oldLineI) { p.rect.x += dx; p.rect.width -= dx; }
+                }
+                for (let e of enemies) {
+                    if (lineXs[i-1] <= e.x && e.x < oldLineI) { e.x += dx/2; e.rect.x = Math.floor(e.x); }
+                    else if (oldLineI <= e.x && e.x < lineXs[i+1]) { e.x += dx/2; e.rect.x = Math.floor(e.x); }
+                }
+            }
         }
 
-        player.applyPhysics(platforms);
-        player.update();
-        
-        // 떨어짐 체크
-        if (player.y > HEIGHT + 200) {
-            player.lives--;
-            if (player.lives < 0) gameOver = true;
-            else player.respawn();
+        if (keysPressed["KeyE"] || keysPressed["e"]) {
+            let cIdx = lineXs.findIndex((x, j) => j < lineXs.length - 1 && x <= mx && mx < lineXs[j+1]);
+            if (cIdx !== -1) enemies.push(new Enemy(lineXs[cIdx] + Math.floor(colWidths[cIdx]/2) - 64, Math.floor(my/GRID_H)*GRID_H + GRID_H - 123));
+        } else if (keysPressed["Digit1"]) currentBrush = 1;
+        else if (keysPressed["Digit2"]) currentBrush = 2;
+        else if (keysPressed["KeyS"] || keysPressed["s"]) { 
+            let cIdx = lineXs.findIndex((x, j) => j < lineXs.length - 1 && x <= mx && mx < lineXs[j+1]);
+            if (cIdx !== -1 && colWidths[cIdx] >= 40) {
+                let oldGx = lineXs[cIdx], oldGw = colWidths[cIdx];
+                let w1 = Math.floor(oldGw/2), w2 = oldGw - w1;
+                colWidths[cIdx] = w1; colWidths.splice(cIdx + 1, 0, w2);
+                let newPlats = platforms.filter(p => !p.isWall && p.rect.x === oldGx && p.rect.width === oldGw).map(p => new Platform(oldGx + w1, p.rect.y, w2, p.rect.height, p.passable, false));
+                platforms.forEach(p => { if(!p.isWall && p.rect.x === oldGx && p.rect.width === oldGw) p.rect.width = w1; });
+                platforms.push(...newPlats); autoSaveCurrentStage(currentStage, platforms, enemies, colWidths, allMapData);
+            }
+        }
+
+        if (draggingLineIdx === null && hoverLine === null) {
+            let cIdx = lineXs.findIndex((x, j) => j < lineXs.length - 1 && x <= mx && mx < lineXs[j+1]);
+            if (cIdx !== -1) {
+                let gx = lineXs[cIdx], gw = colWidths[cIdx], gy = Math.floor(my/GRID_H)*GRID_H;
+                if (isMouseDownL && gy < HEIGHT - FLOOR_THICKNESS) {
+                    if(!platforms.some(p => !p.isWall && new Rect(gx, gy, gw, GRID_H).colliderect(p.rect))) {
+                        platforms.push(new Platform(gx, gy, gw, GRID_H, currentBrush === 1));
+                    }
+                } else if (isMouseDownR) {
+                    platforms = platforms.filter(p => p.isWall || !p.rect.collidepoint(mx, my));
+                    enemies = enemies.filter(e => !e.rect.collidepoint(mx, my));
+                }
+            }
+        }
+    } else {
+        canvas.style.cursor = "default";
+    }
+    for (let k in keysPressed) keysPressed[k] = false;
+
+    // ---------------------------------
+    if (!editorMode && !gameOver && !gameClear) {
+        if (isTransitioning) {
+            transitionY += 15; player.y -= 10; player.rect.y = Math.floor(player.y);
+            if (transitionY >= SCREEN_HEIGHT) {
+                currentStage++; let [p, en, c] = getStageData(allMapData, currentStage);
+                platforms = p; enemies = en; colWidths = c;
+                stageHadEnemies = enemies.length > 0; isTransitioning = false; player.respawn();
+            }
+        } else {
+            effects = effects.filter(ef => !ef.update());
+            for (let e of enemies) {
+                if (e.rollingDir !== 0 && !e.isDead && !player.sweptBy && player.invincibleTimer === 0 && player.kickFreezeTimer === 0 && player.rect.colliderect(e.fullHitRect)) {
+                    player.sweptBy = e;
+                }
+            }
+
+            player.moveX(keys, enemies, platforms); player.jumpAndDrop(keys); player.applyPhysics(platforms, enemies);
+            if (player.y > HEIGHT + 200) {
+                deadSound.play(); player.lives--;
+                if (player.lives < 0) { gameoverSound.play(); gameOver = true; } else player.respawn();
+            }
+            player.shoot(keys, snowballs, shootSound); player.update();
+
+            snowballs = snowballs.filter(sb => {
+                if (sb.update()) { effects.push(new Effect(sb.rect.centerx, sb.rect.centery, 60, 60)); return false; }
+                if (platforms.some(p => !p.passable && sb.rect.colliderect(p.rect))) { effects.push(new Effect(sb.rect.centerx, sb.rect.centery, 60, 60)); return false; }
+                for (let e of enemies) {
+                    if (e.rollingDir === 0 && sb.rect.colliderect(e.fullHitRect)) {
+                        e.facing = e.rect.centerx < player.rect.centerx ? -1 : 1;
+                        if (e.snowLevel < 4) { e.snowLevel++; e.meltTimer = 0; }
+                        else { e.x -= 10 * sb.direction; e.rect.x = Math.floor(e.x); }
+                        effects.push(new Effect(sb.rect.centerx, sb.rect.centery, 60, 60)); return false;
+                    }
+                }
+                return true;
+            });
+
+            for (let re of enemies) {
+                if (re.rollingDir !== 0) {
+                    for (let te of enemies) {
+                        if (te !== re && te.rollingDir === 0 && !te.isDead && re.fullHitRect.colliderect(te.fullHitRect)) {
+                            if (te.snowLevel >= 4) {
+                                let tmp = re.rollingDir; re.rollingDir = re.rollingDir * -1; te.rollingDir = tmp;
+                                if (re.rollingDir > 0) re.x = te.fullHitRect.right + 1;
+                                else re.x = te.fullHitRect.left - re.hitWidth - 1;
+                                re.rect.x = Math.floor(re.x); rollingSound.play();
+                            } else { te.isDead = true; killSound.play(); }
+                        }
+                    }
+                }
+            }
+
+            for (let e of enemies) {
+                e.applyPhysics(platforms); e.updateLogic(platforms, rollingSound);
+                let isZ = keys["KeyZ"] || keys["z"] || keys["Z"];
+                if (e.snowLevel >= 4 && e.rollingDir === 0) {
+                    if (player.rect.inflate(10, 10).colliderect(e.fullHitRect) && isZ && player.kickFreezeTimer === 0) {
+                        e.rollingDir = player.facing; player.kickFreezeTimer = Math.floor(FPS * 0.2); kickSound.play();
+                    } else if (player.velY < 0 && player.rect.colliderect(e.fullHitRect)) {
+                        if (player.rect.top > e.fullHitRect.top + (e.hitHeight * 0.4)) { e.velY = player.jumpPower; e.y += e.velY; kickSound.play(); }
+                    }
+                }
+            }
+
+            for (let e of enemies) {
+                if (e.snowLevel === 0 && !e.isDead && player.rect.colliderect(e.fullHitRect)) {
+                    if (player.sweptBy || player.invincibleTimer > 0) continue;
+                    deadSound.play(); player.lives--;
+                    if (player.lives < 0) { gameoverSound.play(); gameOver = true; } else { player.respawn(); break; }
+                }
+            }
+
+            for (let e of enemies) { if (e.isDead && e.snowLevel >= 4) { effects.push(new Effect(e.rect.centerx, e.rect.centery, e.rect.width, e.rect.height)); boomSound.play(); } }
+            enemies = enemies.filter(e => !e.isDead);
+
+            if (player.sweptBy && player.sweptBy.isDead) { player.sweptBy = null; player.invincibleTimer = Math.floor(FPS * 1.5); }
+
+            if (enemies.length === 0 && stageHadEnemies) {
+                if (currentStage < MAX_STAGES) {
+                    isTransitioning = true; transitionY = 0; snowballs = []; effects = []; stageHadEnemies = false;
+                } else { gameClear = true; goodbyeSound.play(); stageHadEnemies = false; }
+            }
         }
     }
 
-    // 2. 화면 그리기
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // 메인 화면 지우기
-    gameCtx.clearRect(0, 0, gameSurf.width, gameSurf.height); // 게임 레이어 지우기
+    // ---------------------------------
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = isTransitioning ? "#a0a0a0" : "#c8c8c8";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 플랫폼 렌더링
+    gameCtx.clearRect(0, 0, gameCtx.canvas.width, gameCtx.canvas.height);
+
+    if (editorMode) {
+        gameCtx.strokeStyle = "rgba(200, 200, 200, 0.8)"; gameCtx.lineWidth = 2;
+        for (let x of lineXs) { gameCtx.beginPath(); gameCtx.moveTo(x, 0); gameCtx.lineTo(x, HEIGHT - FLOOR_THICKNESS); gameCtx.stroke(); }
+        for (let y = 0; y <= HEIGHT - FLOOR_THICKNESS; y += GRID_H) { gameCtx.beginPath(); gameCtx.moveTo(WALL_THICKNESS, y); gameCtx.lineTo(WIDTH - WALL_THICKNESS, y); gameCtx.stroke(); }
+    }
+    
     platforms.forEach(p => p.draw(gameCtx));
-    
-    // 플레이어 렌더링
-    player.draw(gameCtx);
-    
-    // 적 렌더링
     enemies.forEach(e => e.draw(gameCtx));
+    snowballs.forEach(sb => sb.draw(gameCtx));
+    effects.forEach(ef => ef.draw(gameCtx));
+    player.draw(gameCtx, isTransitioning);
 
-    // 게임 레이어를 화면 중앙에 배치 (OFFSET_X 반영)
-    ctx.drawImage(gameSurf, OFFSET_X, 0);
+    ctx.drawImage(gameCtx.canvas, OFFSET_X, 0);
 
     if (gameOver) {
-        ctx.fillStyle = "red";
-        ctx.font = "bold 72px Arial";
-        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(0,0,SCREEN_WIDTH, SCREEN_HEIGHT);
+        ctx.fillStyle = "red"; ctx.font = "bold 72px Arial"; ctx.textAlign = "center";
         ctx.fillText("GAME OVER", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+    } else if (gameClear) {
+        ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.fillRect(0,0,SCREEN_WIDTH, SCREEN_HEIGHT);
+        ctx.fillStyle = "green"; ctx.font = "bold 72px Arial"; ctx.textAlign = "center";
+        ctx.fillText("GAME CLEAR!", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
     } else {
-        ctx.fillStyle = "white";
-        ctx.font = "36px Arial";
-        ctx.fillText(`Stage: ${currentStage} | Lives: ${player.lives}`, SCREEN_WIDTH - 300, 50);
+        ctx.fillStyle = "black"; ctx.font = "36px Arial"; ctx.textAlign = "right";
+        ctx.fillText(`Stage: ${currentStage}`, SCREEN_WIDTH - 200, 50);
+        ctx.fillText(`Lives: ${player.lives}`, SCREEN_WIDTH - 200, 100);
+        
+        if (editorMode) {
+            ctx.fillStyle = "red"; ctx.font = "24px Arial"; ctx.textAlign = "left";
+            let mode = currentBrush === 1 ? "Plat(반투명 점프용)" : "Wall(통과 불가 벽)";
+            ctx.fillText(`EDITOR STAGE ${currentStage} - ${mode} (1: Plat, 2: Wall, E: Enemy, S: Split)`, 20, 40);
+        }
     }
 
-    // 다음 프레임 요청 (무한 루프)
     requestAnimationFrame(gameLoop);
 }
 
-// 게임 시작
 requestAnimationFrame(gameLoop);
 
 </script>

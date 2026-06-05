@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Platformer Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden; /* 스크롤바 숨김 */
+        }
+        canvas {
+            /* 브라우저 창 크기에 맞게 자동 스케일링 */
+            max-width: 100%;
+            max-height: 100%;
+            background-color: #c8c8c8;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="1920" height="1080"></canvas>
+
+<script>
+// --- 1. 기본 설정 및 유틸리티 ---
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+const SCREEN_WIDTH = 1920, SCREEN_HEIGHT = 1080;
+const WIDTH = 1442, HEIGHT = 1080;
+const OFFSET_X = Math.floor((SCREEN_WIDTH - WIDTH) / 2);
+
+const FPS = 60;
+const MAX_STAGES = 5;
+const WALL_THICKNESS = 36, FLOOR_THICKNESS = 72;
+const GRID_H = 72, DEFAULT_GRID_W = 137;
+
+// Pygame의 Rect를 모방한 클래스 (충돌 계산을 동일하게 유지하기 위함)
+class Rect {
+    constructor(x, y, width, height) {
+        this.x = x; this.y = y;
+        this.width = width; this.height = height;
+    }
+    get left() { return this.x; }
+    set left(v) { this.x = v; }
+    get right() { return this.x + this.width; }
+    set right(v) { this.x = v - this.width; }
+    get top() { return this.y; }
+    set top(v) { this.y = v; }
+    get bottom() { return this.y + this.height; }
+    set bottom(v) { this.y = v - this.height; }
+    get centerx() { return this.x + this.width / 2; }
+    set centerx(v) { this.x = v - this.width / 2; }
+    get centery() { return this.y + this.height / 2; }
+    set centery(v) { this.y = v - this.height / 2; }
+    
+    copy() { return new Rect(this.x, this.y, this.width, this.height); }
+    colliderect(other) {
+        return !(other.left >= this.right || other.right <= this.left ||
+                 other.top >= this.bottom || other.bottom <= this.top);
+    }
+    collidepoint(px, py) {
+        return px >= this.left && px <= this.right && py >= this.top && py <= this.bottom;
+    }
+    inflate(dw, dh) {
+        return new Rect(this.x - dw/2, this.y - dh/2, this.width + dw, this.height + dh);
+    }
+}
+
+// 이미지 및 사운드 더미 로더 (실제 파일 경로로 변경 가능)
+const loadedImages = {};
+function loadImg(path, width, height, fallbackColor = "rgba(200, 200, 200, 0.5)") {
+    if (!loadedImages[path]) {
+        const img = new Image();
+        img.src = `images/${path}`; // 실제 에셋 폴더 구조에 맞게
+        loadedImages[path] = { img: img, w: width, h: height, color: fallbackColor };
+    }
+    return loadedImages[path];
+}
+
+class DummySound {
+    play() {}
+    get_length() { return 5.0; }
+}
+
+function loadSound(path) {
+    // 실제 사운드가 있다면 new Audio(`sounds/${path}`)를 사용할 수 있습니다.
+    return new DummySound();
+}
+
+// 그리기 유틸리티 함수
+function drawImageOrFallback(surfaceCtx, imgObj, x, y, isCentered = false) {
+    if (imgObj.img.complete && imgObj.img.naturalWidth > 0) {
+        let drawX = x, drawY = y;
+        if (isCentered) {
+            drawX = x - imgObj.w / 2;
+            drawY = y - imgObj.h; // midbottom 기준
+        }
+        surfaceCtx.drawImage(imgObj.img, drawX, drawY, imgObj.w, imgObj.h);
+    } else {
+        surfaceCtx.fillStyle = imgObj.color;
+        if (isCentered) {
+            surfaceCtx.fillRect(x - imgObj.w / 2, y - imgObj.h, imgObj.w, imgObj.h);
+        } else {
+            surfaceCtx.fillRect(x, y, imgObj.w, imgObj.h);
+        }
+    }
+}
+
+// --- 2. 맵 데이터 (LocalStorage 사용) ---
+function loadAllStages() {
+    const data = localStorage.getItem("map_data_json");
+    if (!data) return {};
+    try { return JSON.parse(data); } catch { return {}; }
+}
+
+function saveAllStages(data) {
+    localStorage.setItem("map_data_json", JSON.stringify(data));
+}
+
+function getStageData(allData, stageNum) {
+    const stageKey = `stage_${stageNum}`;
+    if (allData[stageKey]) {
+        const pData = allData[stageKey].platforms;
+        const eData = allData[stageKey].enemies;
+        const colW = allData[stageKey].col_widths || Array(10).fill(DEFAULT_GRID_W);
+        return [
+            pData.map(p => new Platform(p[0], p[1], p[2], p[3], p[4], p[5])),
+            eData.map(e => new Enemy(e[0], e[1])),
+            colW
+        ];
+    } else {
+        const defaultPlatforms = [
+            new Platform(0, HEIGHT - FLOOR_THICKNESS, WIDTH, FLOOR_THICKNESS, false, true),
+            new Platform(0, 0, WALL_THICKNESS, HEIGHT, false, true),
+            new Platform(WIDTH - WALL_THICKNESS, 0, WALL_THICKNESS, HEIGHT, false, true)
+        ];
+        return [defaultPlatforms, [], Array(10).fill(DEFAULT_GRID_W)];
+    }
+}
+
+function autoSaveCurrentStage(stageNum, platforms, enemies, colWidths, allData) {
+    allData[`stage_${stageNum}`] = {
+        platforms: platforms.map(p => [p.rect.x, p.rect.y, p.rect.width, p.rect.height, p.passable, p.isWall]),
+        enemies: enemies.map(e => [e.rect.x, e.rect.y]),
+        col_widths: colWidths
+    };
+    saveAllStages(allData);
+}
+
+// --- 3. 클래스 정의 ---
+class Platform {
+    constructor(x, y, width, height, passable = true, isWall = false) {
+        this.rect = new Rect(x, y, width, height);
+        this.passable = passable;
+        this.isWall = isWall;
+        this.exposedTop = true; this.exposedLeft = true; this.exposedRight = true;
+    }
+    draw(surfaceCtx) {
+        surfaceCtx.fillStyle = this.passable ? "rgba(100, 200, 100, 0.6)" : "rgba(80, 80, 80, 0.6)";
+        surfaceCtx.fillRect(this.rect.x, this.rect.y, this.rect.width, this.rect.height);
+    }
+}
+
+class Player {
+    constructor(x, y) {
+        this.width = 99; this.height = 139;
+        this.rect = new Rect(x, y, this.width, this.height);
+        this.x = x; this.y = y;
+        this.velY = 0; this.speed = 6;
+        this.gravity = 0.5; this.jumpPower = -12.25;
+        this.onGround = false; this.facing = 1;
+        this.shootCooldown = 0; this.lives = 2;
+        this.sweptBy = null; this.invincibleTimer = 0;
+        this.kickFreezeTimer = 0; this.isCrouching = false;
+        this.attackTimer = 0; this.currentPlatform = null;
+
+        // 에셋 로딩 (색상은 이미지가 없을 때를 위한 플레이스홀더)
+        this.imgL = loadImg("player_L.png", this.width, this.height, "blue");
+        this.imgR = loadImg("player_R.png", this.width, this.height, "blue");
+        this.imgDownL = loadImg("down_L.png", 104, 95, "lightblue");
+        this.imgDownR = loadImg("down_R.png", 104, 95, "lightblue");
+        this.imgAttackL = loadImg("attack_L.png", 111, 138, "cyan");
+        this.imgAttackR = loadImg("attack_R.png", 111, 138, "cyan");
+    }
+
+    get terrainRect() { return new Rect(this.rect.x, this.rect.bottom - 70, this.rect.width, 70); }
+    get floorRect() { 
+        const w = Math.floor(this.rect.width / 2);
+        const offsetX = Math.floor((this.rect.width - w) / 2);
+        return new Rect(this.rect.x + offsetX, this.rect.bottom - 70, w, 70);
+    }
+
+    respawn() {
+        this.x = 100.0; this.y = HEIGHT - FLOOR_THICKNESS - this.height;
+        this.rect.x = this.x; this.rect.y = this.y;
+        this.velY = 0; this.onGround = false; this.sweptBy = null;
+        this.invincibleTimer = 90; this.kickFreezeTimer = 0;
+        this.isCrouching = false; this.attackTimer = 0;
+    }
+
+    applyPhysics(platforms) {
+        if (this.sweptBy || this.kickFreezeTimer > 0) return;
+        let prevBottom = this.rect.bottom;
+        this.velY += this.gravity;
+        this.y += this.velY; this.rect.y = Math.floor(this.y);
+        this.onGround = false;
+
+        for (let plat of platforms) {
+            if (plat.isWall || plat.exposedTop) {
+                if (this.floorRect.colliderect(plat.rect) && this.velY > 0 && prevBottom <= plat.rect.top + 2) {
+                    this.rect.bottom = plat.rect.top;
+                    this.y = this.rect.y; this.velY = 0; this.onGround = true;
+                    this.currentPlatform = plat;
+                }
+            }
+        }
+    }
+
+    update() {
+        if (this.invincibleTimer > 0) this.invincibleTimer--;
+        if (this.kickFreezeTimer > 0) this.kickFreezeTimer--;
+        if (this.attackTimer > 0) this.attackTimer--;
+        if (this.shootCooldown > 0) this.shootCooldown--;
+    }
+
+    draw(ctx) {
+        if (this.invincibleTimer > 0 && Math.floor(this.invincibleTimer / 5) % 2 !== 0) return;
+        let img = this.facing === 1 ? this.imgR : this.imgL;
+        if (this.sweptBy) img = this.sweptBy.rollingDir === 1 ? this.imgDownR : this.imgDownL;
+        else if (this.attackTimer > 0) img = this.facing === 1 ? this.imgAttackR : this.imgAttackL;
+        else if (this.isCrouching) img = this.facing === 1 ? this.imgDownR : this.imgDownL;
+
+        drawImageOrFallback(ctx, img, this.rect.centerx, this.rect.bottom, true);
+    }
+}
+
+class Enemy {
+    constructor(x, y) {
+        this.width = 128; this.height = 123;
+        this.rect = new Rect(x, y, this.width, this.height);
+        this.x = x; this.y = y;
+        this.velY = 0; this.gravity = 0.5;
+        this.snowLevel = 0; this.rollingDir = 0; this.rollingSpeed = 15;
+        this.isDead = false; this.facing = 1;
+        this.img = loadImg("enemy.png", this.width, this.height, "red");
+    }
+    // 기본 로직 구조 유지 (크기 상략됨)
+    draw(ctx) {
+        drawImageOrFallback(ctx, this.img, this.rect.x, this.rect.y);
+    }
+}
+
+// --- 4. 메인 게임 루프 및 입력 ---
+const keys = {};
+window.addEventListener("keydown", (e) => { keys[e.code] = true; });
+window.addEventListener("keyup", (e) => { keys[e.code] = false; });
+
+const player = new Player(100, HEIGHT - FLOOR_THICKNESS - 139);
+const allMapData = loadAllStages();
+let currentStage = 1;
+let [platforms, enemies, colWidths] = getStageData(allMapData, currentStage);
+let gameOver = false;
+
+// 오프스크린 캔버스 (game_surf 대체)
+const gameSurf = document.createElement("canvas");
+gameSurf.width = WIDTH; gameSurf.height = HEIGHT;
+const gameCtx = gameSurf.getContext("2d");
+
+function gameLoop() {
+    // 1. 상태 업데이트
+    if (!gameOver) {
+        let dx = 0;
+        player.isCrouching = keys["ArrowDown"];
+        if (!player.isCrouching && player.kickFreezeTimer === 0 && !player.sweptBy) {
+            if (keys["ArrowLeft"]) { dx = -player.speed; player.facing = -1; }
+            if (keys["ArrowRight"]) { dx = player.speed; player.facing = 1; }
+        }
+        
+        player.x += dx; player.rect.x = Math.floor(player.x);
+        
+        // 점프 (키보드 X)
+        if (player.onGround && keys["KeyX"]) {
+            player.velY = player.jumpPower;
+            player.onGround = false;
+            player.currentPlatform = null;
+        }
+
+        player.applyPhysics(platforms);
+        player.update();
+        
+        // 떨어짐 체크
+        if (player.y > HEIGHT + 200) {
+            player.lives--;
+            if (player.lives < 0) gameOver = true;
+            else player.respawn();
+        }
+    }
+
+    // 2. 화면 그리기
+    ctx.clearRect(0, 0, canvas.width, canvas.height); // 메인 화면 지우기
+    gameCtx.clearRect(0, 0, gameSurf.width, gameSurf.height); // 게임 레이어 지우기
+
+    // 플랫폼 렌더링
+    platforms.forEach(p => p.draw(gameCtx));
+    
+    // 플레이어 렌더링
+    player.draw(gameCtx);
+    
+    // 적 렌더링
+    enemies.forEach(e => e.draw(gameCtx));
+
+    // 게임 레이어를 화면 중앙에 배치 (OFFSET_X 반영)
+    ctx.drawImage(gameSurf, OFFSET_X, 0);
+
+    if (gameOver) {
+        ctx.fillStyle = "red";
+        ctx.font = "bold 72px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("GAME OVER", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+    } else {
+        ctx.fillStyle = "white";
+        ctx.font = "36px Arial";
+        ctx.fillText(`Stage: ${currentStage} | Lives: ${player.lives}`, SCREEN_WIDTH - 300, 50);
+    }
+
+    // 다음 프레임 요청 (무한 루프)
+    requestAnimationFrame(gameLoop);
+}
+
+// 게임 시작
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>

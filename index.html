@@ -462,13 +462,38 @@ class Player {
 const keys = {}; 
 let isGameStarted = false;
 
+// --- 전체화면 전환 함수 ---
+function enterFullScreen() {
+    const doc = window.document;
+    const docEl = doc.documentElement;
+
+    // 브라우저별 전체화면 API 지원 확인
+    const requestFullScreen = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+
+    // 현재 전체화면 상태가 아니라면 전체화면 요청
+    if (!doc.fullscreenElement && !doc.webkitFullscreenElement && !doc.mozFullScreenElement && !doc.msFullscreenElement) {
+        if (requestFullScreen) {
+            // 사용자 상호작용을 통해 전체화면 실행
+            requestFullScreen.call(docEl).catch(err => {
+                console.log(`전체화면 전환 에러: ${err.message}`);
+            });
+        }
+    }
+}
+    
 // 5-1. 오디오 시작 안전장치 (클릭, 터치, 아무 키 입력 시 해제)
 function startAudio() {
-    if (!isGameStarted) { isGameStarted = true; bgmSound.play(); }
+    if (!isGameStarted) { 
+        isGameStarted = true; 
+        bgmSound.play(); 
+    }
+    // 사용자가 상호작용(터치/클릭)할 때 꽉찬 화면 적용
+    enterFullScreen(); 
 }
+// 이벤트 리스너들은 절대 지워지면 안 됩니다!
 document.addEventListener("touchstart", startAudio, { once: true });
 document.addEventListener("mousedown", startAudio, { once: true });
-document.addEventListener("keydown", startAudio, { once: true }); // PC 환경을 위한 키보드 첫 입력 인식
+document.addEventListener("keydown", startAudio, { once: true }); 
 
 // 5-2. PC 환경: 물리 키보드 이벤트 살리기
 window.addEventListener("keydown", (e) => {

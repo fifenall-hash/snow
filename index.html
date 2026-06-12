@@ -82,7 +82,7 @@ const ctx = canvas.getContext("2d");
 const SCREEN_WIDTH = 1920, SCREEN_HEIGHT = 1080;
 const WIDTH = 1442, HEIGHT = 1080;
 const OFFSET_X = Math.floor((SCREEN_WIDTH - WIDTH) / 2);
-const FPS = 60, MAX_STAGES = 5;
+const FPS = 60, MAX_STAGES = 5; // 필요시 61로 변경 가능
 const WALL_THICKNESS = 36, FLOOR_THICKNESS = 72;
 const GRID_H = 72, DEFAULT_GRID_W = 137;
 
@@ -127,7 +127,6 @@ class RealSound {
     }
     play() {
         if (this.audio.loop) { 
-            // BGM은 재생 성공/실패 여부를 알 수 있도록 반환합니다.
             return this.audio.play(); 
         } else { 
             let clone = this.audio.cloneNode(); 
@@ -174,6 +173,7 @@ function loadAllStages() {
     if (Object.keys(parsedData).length === 0 || !parsedData["stage_1"]) return myOriginalMapData;
     return parsedData;
 }
+
 function getStageData(allData, stageNum) {
     const stageKey = `stage_${stageNum}`;
     if (allData[stageKey]) {
@@ -184,6 +184,7 @@ function getStageData(allData, stageNum) {
     }
     return [ [], [], [] ];
 }
+
 function updatePlatformEdges(platforms) {
     for (let p of platforms) {
         if (p.passable || p.isWall) { p.exposedTop = true; p.exposedLeft = true; p.exposedRight = true; } 
@@ -511,10 +512,20 @@ function startAudio() {
         }
     }
 }
-// { once: true }를 지웠습니다! 재생에 성공할 때까지 계속 감지합니다.
+// 재생에 성공할 때까지 계속 감지합니다.
 document.addEventListener("touchstart", startAudio);
 document.addEventListener("mousedown", startAudio);
-document.addEventListener("keydown", startAudio);
+document.addEventListener("keydown", startAudio); 
+
+// 5-2. PC 환경: 물리 키보드 이벤트 살리기
+window.addEventListener("keydown", (e) => {
+    keys[e.code] = true;
+    if(e.key) keys[e.key.toLowerCase()] = true; // 한/영 무시 적용
+});
+window.addEventListener("keyup", (e) => {
+    keys[e.code] = false;
+    if(e.key) keys[e.key.toLowerCase()] = false;
+});
 
 // 5-3. 모바일 환경: 가상 버튼 입력 연결
 function setupButton(id, code) {
@@ -698,7 +709,6 @@ if ('serviceWorker' in navigator) {
             });
     });
 }
-
 </script>
 </body>
 </html>

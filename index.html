@@ -74,6 +74,12 @@
     </div>
 </div>
 
+<div id="install-banner" style="display: none; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.8); border: 2px solid #fff; border-radius: 30px; padding: 10px 20px; z-index: 1000; display: flex; align-items: center; gap: 15px;">
+    <span style="color: white; font-family: Arial; font-weight: bold;">앱으로 더 편하게 즐기세요!</span>
+    <button id="install-btn" style="background: #4CAF50; color: white; border: none; padding: 10px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 16px;">설치하기</button>
+    <button id="close-install-btn" style="background: transparent; color: #ccc; border: none; font-size: 20px; cursor: pointer;">✖</button>
+</div>
+
 <script>
 // --- 1. 기본 설정 및 유틸리티 ---
 const canvas = document.getElementById("gameCanvas");
@@ -698,6 +704,54 @@ function gameLoop() {
 requestAnimationFrame(gameLoop);
 
 // --- PWA 서비스 워커 등록 코드 ---
+
+// --- 커스텀 앱 설치(Install) 로직 ---
+let deferredPrompt;
+const installBanner = document.getElementById('install-banner');
+const installBtn = document.getElementById('install-btn');
+const closeInstallBtn = document.getElementById('close-install-btn');
+
+// 시작할 때 일단 배너를 숨겨둡니다.
+installBanner.style.display = 'none';
+
+// 브라우저가 '설치 가능' 상태라고 판단하면 이 이벤트를 발생시킵니다.
+window.addEventListener('beforeinstallprompt', (e) => {
+    // 크롬이 지멋대로 하단에 미니 팝업을 띄우는 것을 막습니다.
+    e.preventDefault();
+    // 이벤트를 보관해둡니다. (나중에 설치 버튼 누를 때 써야 함)
+    deferredPrompt = e;
+    // 우리가 만든 설치 배너를 화면에 보여줍니다.
+    installBanner.style.display = 'flex';
+});
+
+// 유저가 '설치하기' 버튼을 눌렀을 때
+installBtn.addEventListener('click', async () => {
+    installBanner.style.display = 'none'; // 배너 숨김
+    if (deferredPrompt) {
+        // 보관해둔 설치 팝업을 화면에 띄웁니다!
+        deferredPrompt.prompt();
+        // 유저가 설치를 수락했는지 거절했는지 결과를 기다립니다.
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            console.log('유저가 앱 설치를 수락했습니다.');
+        } else {
+            console.log('유저가 앱 설치를 거절했습니다.');
+        }
+        deferredPrompt = null;
+    }
+});
+
+// 배너 닫기 버튼
+closeInstallBtn.addEventListener('click', () => {
+    installBanner.style.display = 'none';
+});
+
+// 설치가 완전히 끝났을 때의 처리
+window.addEventListener('appinstalled', () => {
+    installBanner.style.display = 'none';
+    console.log('PWA 앱 설치 완료!');
+});
+    
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('./service_worker.js')
